@@ -1,0 +1,21 @@
+20 min granularitate 1e-3
+Epoch 5, Loss: 13017.6035
+Gradients for fc_project.weight: 0.010995052754878998
+Gradients for fc_project.bias: 0.03391791135072708
+Gradients for RNN.weight_ih_l0: 0.2907293736934662
+Gradients for RNN.weight_hh_l0: 0.08740846812725067
+Gradients for RNN.bias_ih_l0: 0.303362101316452
+Gradients for RNN.bias_hh_l0: 0.303362101316452
+Gradients for fc.weight: 0.03656677529215813
+Gradients for fc.bias: 0.11000318080186844
+
+zi granularitate 1e-3
+Epoch 5, Loss: 164.9148
+Gradients for fc_project.weight: 0.00042065829620696604
+Gradients for fc_project.bias: 0.0008633743273094296
+Gradients for RNN.weight_ih_l0: 0.0790051817893982
+Gradients for RNN.weight_hh_l0: 0.06463322788476944
+Gradients for RNN.bias_ih_l0: 0.0710819810628891
+Gradients for RNN.bias_hh_l0: 0.0710819810628891
+Gradients for fc.weight: 0.06532809138298035
+Gradients for fc.bias: 0.06416422873735428
