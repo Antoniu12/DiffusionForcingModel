@@ -13,10 +13,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchmetrics import R2Score
-
-import matplotlib.pyplot as plt
+from torchmetrics.regression import SymmetricMeanAbsolutePercentageError
 import random
 
+#r**2 cu cat mai aproape de 1 mai bine
+#mape sau smape(mai ok)
+#neaparat sa plotez
+
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+#print(device)
 def forward_diffuse(xt, kt, alpha):
     sqrt = torch.sqrt(alpha[kt])
     sqrt2 = torch.sqrt(1-alpha[kt])
@@ -24,27 +29,34 @@ def forward_diffuse(xt, kt, alpha):
     return sqrt * xt + sqrt2 * noise
 
 def df_training(model, data, alpha, K, epochs):
-    optimizer = optim.Adam(model.parameters(), lr = 1e-4)
+    model#.to(device)
+    optimizer = optim.AdamW(model.parameters(), lr = 1e-4)
     loss_function = nn.MSELoss()
-    r2_metric = R2Score()
+    r2_loss = R2Score()#.to(device)
+    smape_loss = SymmetricMeanAbsolutePercentageError()#.to(device)
+
+
+    mse_loss_list, r2_score_list, smape_score_list = [], [], []
 
     for epoch in range(epochs):
-        epoch_loss = 0
-        zt_prev = torch.zeros((1, 24 , (model.fc.in_features)))
+        epoch_loss, epoch_r2, epoch_smape = 0, 0, 0
+        zt_prev = torch.zeros((1, 24 , model.fc.in_features))#.to(device)
 
         for trajectory in data:
             xt, label = trajectory
+            xt = xt#.to(device)
+            label = label#.to(device)
+
             #print(f"trajectory: {trajectory}")
             optimizer.zero_grad()
-            trajectory_loss = 0
-            t = 0
+            #t = 0
             #print(f"Iteration: {t}")
-            t+=1
+            #t+=1
             #print(f"xt: {xt}")
 
             # print(f"zt_prev shape: {zt_prev.shape}")
 
-            xt = xt.unsqueeze(0) # batch size
+            xt = xt.unsqueeze(0)
             xt = model.fc_project(xt)
 
             # print(f"xt shape: {xt.shape}")
@@ -65,23 +77,31 @@ def df_training(model, data, alpha, K, epochs):
             # print(epsilon_pred.shape)
             # print(epsilon_true.shape)
             trajectory_loss = loss_function(epsilon_pred, epsilon_true)
+            r2_value = r2_loss(epsilon_pred.reshape(-1), epsilon_true.reshape(-1))
+            smape_value = smape_loss(epsilon_pred, epsilon_true)
 
             trajectory_loss.backward()
             optimizer.step()
-            epoch_loss += trajectory_loss
 
+            epoch_loss += trajectory_loss.item()
+            epoch_r2 += r2_value.item()
+            epoch_smape += smape_value.item()
+
+        mse_loss_list.append(epoch_loss / len(data))
+        r2_score_list.append(epoch_r2 / len(data))
+        smape_score_list.append(epoch_smape / len(data))
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
         # for name, param in model.named_parameters():
         #     if param.grad is not None:
         #         print(f"Gradients for {name}: {param.grad.norm().item()}")
-#r**2 cu cat mai aproape de 1 mai bine
-#mape sau smape(mai ok)
-#neaparat sa plotez
+
 class DFModel(nn.Module):
     def __init__(self, input_dim, hidden_dim):
         super().__init__()
         self.fc_project = nn.Linear(2, hidden_dim)
-        self.RNN = nn.RNN(input_dim, hidden_dim, batch_first=True)
+        #self.RNN = nn.RNN(input_dim, hidden_dim, batch_first=True)
+        self.RNN = nn.LSTM(input_dim, hidden_dim, num_layers=2, batch_first=True, dropout=0.1)
+
         self.fc = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, zt_prev, xt_noisy):
@@ -89,7 +109,4 @@ class DFModel(nn.Module):
         # print(f"input shape: {input.shape}")
         output, _ = self.RNN(input)
         return self.fc(output)
-
-
-
 

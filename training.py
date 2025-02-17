@@ -4,7 +4,7 @@ from sklearn.model_selection import train_test_split
 from df_training_v2 import DFModel, df_training
 from sklearn.preprocessing import MinMaxScaler
 
-from torch.nn.functional import cosine_similarity
+#device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #sa nu incerc pe H13!!!!
 
@@ -17,7 +17,7 @@ data['date'] = pd.to_datetime(data['date'])
 data['numeric_date'] = (data['date'] - data['date'].min()).dt.days
 
 data.set_index('date', inplace=True)
-data = data.resample('D').sum()
+data = data.resample('5h').sum()
 
 
 data_normalised = data.copy()
@@ -55,5 +55,5 @@ K = 10
 epochs = 10
 alpha = cosine_noise_schedule(K)
 
-model = DFModel(input_dim=input_dim, hidden_dim=hidden_dim)
+model = DFModel(input_dim=input_dim, hidden_dim=hidden_dim)#.to(device)
 df_training(model, train_sequences, alpha, K, epochs)
