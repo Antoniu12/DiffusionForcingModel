@@ -1,14 +1,14 @@
+import numpy as np
 import pandas as pd
 import torch
 from sklearn.model_selection import train_test_split
 from df_training_v2 import DFModel, df_training
 from sklearn.preprocessing import MinMaxScaler
-
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 #sa nu incerc pe H13!!!!
 
-file_path = './H8_Wh.csv'
+file_path = './training sets/H8_Wh.csv'
 data = pd.read_csv(file_path)
 
 data = data[['date', ' Consumption(Wh)']]
@@ -17,11 +17,10 @@ data['date'] = pd.to_datetime(data['date'])
 data['numeric_date'] = (data['date'] - data['date'].min()).dt.days
 
 data.set_index('date', inplace=True)
-data = data.resample('5h').sum()
+data = data.resample('D').sum()
 
 
 data_normalised = data.copy()
-#min max scaler si la date
 scaler = MinMaxScaler()
 data_normalised[['numeric_date',' Consumption(Wh)']] = scaler.fit_transform(data_normalised[['numeric_date', ' Consumption(Wh)']])
 
@@ -57,3 +56,9 @@ alpha = cosine_noise_schedule(K)
 
 model = DFModel(input_dim=input_dim, hidden_dim=hidden_dim)#.to(device)
 df_training(model, train_sequences, alpha, K, epochs)
+
+# Noise = torch.randint(0, K, (K, seq_length))
+#
+# predicted_test_values = predict(model, test_sequences, Noise, alpha, seq_length, Noise.shape[0])
+# true_test_values = np.array([label.numpy() for _, label in test_sequences])
+# plot_predictions(true_test_values, predicted_test_values)

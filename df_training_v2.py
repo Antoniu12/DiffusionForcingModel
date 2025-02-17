@@ -8,6 +8,16 @@
 # initialize X1:t with white noise
 # iterate down the grid row by row denoising left to right across the columns (by the last row m=0 tokens are clean)
 
+#din training-uri am obersvat ca lr de 1e-4 ii mai bun decat 1e-8
+#si rnn mai bun decat LSTM ???
+#GRU mai bun decat LSTM si asemanator cu RNN
+#lr 1e-1 bunicel dar instabil
+#pe gpu training mai lent???
+#lr 1e-2 foarte bun
+#lr 1e-3 perfect
+#AdamW > RAdam, Adam
+#SGD slab cu lr 1e-3
+#SmoothL1Loss genial pentru loss function
 
 import torch
 import torch.nn as nn
@@ -16,9 +26,7 @@ from torchmetrics import R2Score
 from torchmetrics.regression import SymmetricMeanAbsolutePercentageError
 import random
 
-#r**2 cu cat mai aproape de 1 mai bine
-#mape sau smape(mai ok)
-#neaparat sa plotez
+from plots import TrainingPlotter
 
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #print(device)
@@ -30,22 +38,22 @@ def forward_diffuse(xt, kt, alpha):
 
 def df_training(model, data, alpha, K, epochs):
     model#.to(device)
-    optimizer = optim.AdamW(model.parameters(), lr = 1e-4)
-    loss_function = nn.MSELoss()
+    optimizer = optim.AdamW(model.parameters(), lr = 1e-3)
+    #loss_function = nn.MSELoss()
+    loss_function = nn.SmoothL1Loss()
+
     r2_loss = R2Score()#.to(device)
     smape_loss = SymmetricMeanAbsolutePercentageError()#.to(device)
 
-
-    mse_loss_list, r2_score_list, smape_score_list = [], [], []
+    plotter = TrainingPlotter()
 
     for epoch in range(epochs):
         epoch_loss, epoch_r2, epoch_smape = 0, 0, 0
         zt_prev = torch.zeros((1, 24 , model.fc.in_features))#.to(device)
 
         for trajectory in data:
-            xt, label = trajectory
+            xt, _ = trajectory
             xt = xt#.to(device)
-            label = label#.to(device)
 
             #print(f"trajectory: {trajectory}")
             optimizer.zero_grad()
@@ -87,21 +95,19 @@ def df_training(model, data, alpha, K, epochs):
             epoch_r2 += r2_value.item()
             epoch_smape += smape_value.item()
 
-        mse_loss_list.append(epoch_loss / len(data))
-        r2_score_list.append(epoch_r2 / len(data))
-        smape_score_list.append(epoch_smape / len(data))
+        plotter.update_metrics(epoch_loss / len(data), epoch_r2 / len(data), epoch_smape / len(data), epsilon_pred, epsilon_true)
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
         # for name, param in model.named_parameters():
         #     if param.grad is not None:
         #         print(f"Gradients for {name}: {param.grad.norm().item()}")
-
+    plotter.plot_metrics()
 class DFModel(nn.Module):
     def __init__(self, input_dim, hidden_dim):
         super().__init__()
         self.fc_project = nn.Linear(2, hidden_dim)
         #self.RNN = nn.RNN(input_dim, hidden_dim, batch_first=True)
-        self.RNN = nn.LSTM(input_dim, hidden_dim, num_layers=2, batch_first=True, dropout=0.1)
-
+        #self.RNN = nn.LSTM(input_dim, hidden_dim, num_layers=2, batch_first=True)#, dropout=0.1)
+        self.RNN = nn.GRU(input_dim, hidden_dim, batch_first=True)
         self.fc = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, zt_prev, xt_noisy):
