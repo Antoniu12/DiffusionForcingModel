@@ -36,8 +36,8 @@ def forward_diffuse(xt, kt, alpha):
     noise = torch.randn_like(xt)
     return sqrt * xt + sqrt2 * noise
 
-def df_training(model, data, alpha, K, epochs):
-    model#.to(device)
+def df_training(model, data, validation_data, alpha, K, epochs):
+    #model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr = 1e-3)
     #loss_function = nn.MSELoss()
     loss_function = nn.SmoothL1Loss()
@@ -53,7 +53,7 @@ def df_training(model, data, alpha, K, epochs):
 
         for trajectory in data:
             xt, _ = trajectory
-            xt = xt#.to(device)
+            #xt = xt.to(device)
 
             #print(f"trajectory: {trajectory}")
             optimizer.zero_grad()
@@ -96,7 +96,33 @@ def df_training(model, data, alpha, K, epochs):
             epoch_smape += smape_value.item()
 
         plotter.update_metrics(epoch_loss / len(data), epoch_r2 / len(data), epoch_smape / len(data), epsilon_pred, epsilon_true)
-        print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
+
+        model.eval()
+        val_loss = 0
+        with torch.no_grad():
+            zt_prev = torch.zeros((1, 24, model.fc.in_features))
+            for trajectory in validation_data:
+                xt, _ = trajectory
+
+                xt = xt.unsqueeze(0)
+                xt = model.fc_project(xt)
+
+                output = model(zt_prev, xt_noisy)
+
+                kt = torch.randint(0, K, (1,)).item()
+                xt_noisy = forward_diffuse(xt, kt, alpha)
+                sqrt = torch.sqrt(alpha[kt])
+                sqrt2 = torch.sqrt(torch.clamp(1 - alpha[kt], min=1e-8))
+                epsilon_true = (xt_noisy - sqrt * xt) / sqrt2
+
+                zt_prev_updated = output[..., :-16]
+                zt_prev = zt_prev_updated.clone().detach()
+                output = output[..., -16:]
+
+                loss = loss_function(output, epsilon_true)
+                val_loss += loss.item()
+
+        print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.4f}, Validation Loss: {val_loss / len(validation_data)}")
         # for name, param in model.named_parameters():
         #     if param.grad is not None:
         #         print(f"Gradients for {name}: {param.grad.norm().item()}")
@@ -105,9 +131,9 @@ class DFModel(nn.Module):
     def __init__(self, input_dim, hidden_dim):
         super().__init__()
         self.fc_project = nn.Linear(2, hidden_dim)
-        #self.RNN = nn.RNN(input_dim, hidden_dim, batch_first=True)
+        self.RNN = nn.RNN(input_dim, hidden_dim, batch_first=True)
         #self.RNN = nn.LSTM(input_dim, hidden_dim, num_layers=2, batch_first=True)#, dropout=0.1)
-        self.RNN = nn.GRU(input_dim, hidden_dim, batch_first=True)
+        #self.RNN = nn.GRU(input_dim, hidden_dim, batch_first=True)
         self.fc = nn.Linear(hidden_dim, input_dim)
 
     def forward(self, zt_prev, xt_noisy):

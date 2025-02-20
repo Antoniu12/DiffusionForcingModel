@@ -24,10 +24,11 @@ data_normalised = data.copy()
 scaler = MinMaxScaler()
 data_normalised[['numeric_date',' Consumption(Wh)']] = scaler.fit_transform(data_normalised[['numeric_date', ' Consumption(Wh)']])
 
-train_data, test_data = train_test_split(data_normalised, test_size=0.1, shuffle = False)
-#feature engineering si data analisys
-#pearson corelation
+aux_data, test_data = train_test_split(data_normalised, test_size=0.1, shuffle = False)
+train_data, validation_data = train_test_split(aux_data, test_size=0.2, shuffle = False)
+
 train_tensor = torch.tensor(train_data[['numeric_date', ' Consumption(Wh)']].values, dtype=torch.float32)
+validation_tensor = torch.tensor(validation_data[['numeric_date', ' Consumption(Wh)']].values, dtype=torch.float32)
 test_tensor = torch.tensor(test_data[['numeric_date', ' Consumption(Wh)']].values, dtype=torch.float32)
 
 def create_sequences(data_tensor, seq_length):
@@ -41,8 +42,9 @@ def create_sequences(data_tensor, seq_length):
 seq_length = 24
 train_sequences = create_sequences(train_tensor, seq_length)
 test_sequences = create_sequences(test_tensor, seq_length)
-
+validation_sequences = create_sequences(validation_tensor, seq_length)
 print(f"Number of training sequences: {len(train_sequences)}")
+print(f"Number of validation sequences: {len(validation_sequences)}")
 print(f"Number of test sequences: {len(test_sequences)}")
 
 def cosine_noise_schedule(timesteps):
@@ -55,7 +57,7 @@ epochs = 10
 alpha = cosine_noise_schedule(K)
 
 model = DFModel(input_dim=input_dim, hidden_dim=hidden_dim)#.to(device)
-df_training(model, train_sequences, alpha, K, epochs)
+df_training(model, train_sequences, validation_sequences, alpha, K, epochs)
 
 # Noise = torch.randint(0, K, (K, seq_length))
 #
