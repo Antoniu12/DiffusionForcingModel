@@ -17,7 +17,7 @@ data['date'] = pd.to_datetime(data['date'])
 data['numeric_date'] = (data['date'] - data['date'].min()).dt.days
 
 data.set_index('date', inplace=True)
-data = data.resample('D').sum()
+data = data.resample('1h').sum()
 
 
 data_normalised = data.copy()
