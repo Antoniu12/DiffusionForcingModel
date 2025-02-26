@@ -1,12 +1,290 @@
-Number of training sequences: 306
-Number of test sequences: 13
-Epoch 1, Loss: 264.1754
-Epoch 2, Loss: 236.3379
-Epoch 3, Loss: 225.6508
-Epoch 4, Loss: 208.9182
-Epoch 5, Loss: 201.6958
-Epoch 6, Loss: 182.3062
-Epoch 7, Loss: 173.4788
-Epoch 8, Loss: 153.2678
-Epoch 9, Loss: 149.8236
-Epoch 10, Loss: 140.6136
+using MSE
+Number of training sequences: 6300
+Number of validation sequences: 1557
+Number of test sequences: 855
+Epoch 1, Loss: 2.4945, Validation Loss: 1.1929
+Gradients for fc_project_2_to_hidden.weight: 0.012613293714821339
+Gradients for fc_project_2_to_hidden.bias: 0.01708107814192772
+Gradients for RNN.weight_ih_l0: 0.6473838090896606
+Gradients for RNN.weight_hh_l0: 0.17420591413974762
+Gradients for RNN.bias_ih_l0: 0.13686886429786682
+Gradients for RNN.bias_hh_l0: 0.13686886429786682
+Gradients for RNN.weight_ih_l1: 0.3947591483592987
+Gradients for RNN.weight_hh_l1: 0.42778387665748596
+Gradients for RNN.bias_ih_l1: 0.19632679224014282
+Gradients for RNN.bias_hh_l1: 0.19632679224014282
+Gradients for fc_project_hidden_to_input.weight: 0.28971317410469055
+Gradients for fc_project_hidden_to_input.bias: 0.11301752179861069
+Epoch 1, LR: 0.001
+Epoch 2, Loss: 1.6353, Validation Loss: 0.9640
+Gradients for fc_project_2_to_hidden.weight: 0.011690204031765461
+Gradients for fc_project_2_to_hidden.bias: 0.015477927401661873
+Gradients for RNN.weight_ih_l0: 0.7423017024993896
+Gradients for RNN.weight_hh_l0: 0.15975035727024078
+Gradients for RNN.bias_ih_l0: 0.15125806629657745
+Gradients for RNN.bias_hh_l0: 0.15125806629657745
+Gradients for RNN.weight_ih_l1: 0.35158997774124146
+Gradients for RNN.weight_hh_l1: 0.3269689381122589
+Gradients for RNN.bias_ih_l1: 0.20868326723575592
+Gradients for RNN.bias_hh_l1: 0.20868326723575592
+Gradients for fc_project_hidden_to_input.weight: 0.21860593557357788
+Gradients for fc_project_hidden_to_input.bias: 0.10919328778982162
+Epoch 2, LR: 0.001
+Epoch 3, Loss: 1.4986, Validation Loss: 0.7284
+Gradients for fc_project_2_to_hidden.weight: 0.012797347269952297
+Gradients for fc_project_2_to_hidden.bias: 0.017195025458931923
+Gradients for RNN.weight_ih_l0: 0.6677451133728027
+Gradients for RNN.weight_hh_l0: 0.12823621928691864
+Gradients for RNN.bias_ih_l0: 0.14074373245239258
+Gradients for RNN.bias_hh_l0: 0.14074373245239258
+Gradients for RNN.weight_ih_l1: 0.4470474123954773
+Gradients for RNN.weight_hh_l1: 0.3673756420612335
+Gradients for RNN.bias_ih_l1: 0.2214883714914322
+Gradients for RNN.bias_hh_l1: 0.2214883416891098
+Gradients for fc_project_hidden_to_input.weight: 0.2324930876493454
+Gradients for fc_project_hidden_to_input.bias: 0.10300902277231216
+Epoch 3, LR: 0.001
+Epoch 4, Loss: 1.4117, Validation Loss: 0.7226
+Gradients for fc_project_2_to_hidden.weight: 0.007399654481559992
+Gradients for fc_project_2_to_hidden.bias: 0.009671696461737156
+Gradients for RNN.weight_ih_l0: 0.6783629655838013
+Gradients for RNN.weight_hh_l0: 0.1555207073688507
+Gradients for RNN.bias_ih_l0: 0.12556086480617523
+Gradients for RNN.bias_hh_l0: 0.12556086480617523
+Gradients for RNN.weight_ih_l1: 0.3700309693813324
+Gradients for RNN.weight_hh_l1: 0.3932212293148041
+Gradients for RNN.bias_ih_l1: 0.2697739601135254
+Gradients for RNN.bias_hh_l1: 0.2697739601135254
+Gradients for fc_project_hidden_to_input.weight: 0.17808717489242554
+Gradients for fc_project_hidden_to_input.bias: 0.1230456680059433
+Epoch 4, LR: 0.001
+Epoch 5, Loss: 1.4117, Validation Loss: 0.7104
+Gradients for fc_project_2_to_hidden.weight: 0.012993727810680866
+Gradients for fc_project_2_to_hidden.bias: 0.017574353143572807
+Gradients for RNN.weight_ih_l0: 0.7252944111824036
+Gradients for RNN.weight_hh_l0: 0.15852010250091553
+Gradients for RNN.bias_ih_l0: 0.14267608523368835
+Gradients for RNN.bias_hh_l0: 0.14267608523368835
+Gradients for RNN.weight_ih_l1: 0.3724338710308075
+Gradients for RNN.weight_hh_l1: 0.28233757615089417
+Gradients for RNN.bias_ih_l1: 0.2589229941368103
+Gradients for RNN.bias_hh_l1: 0.2589230239391327
+Gradients for fc_project_hidden_to_input.weight: 0.17798194289207458
+Gradients for fc_project_hidden_to_input.bias: 0.15312312543392181
+Epoch 5, LR: 0.001
+Epoch 6, Loss: 1.3981, Validation Loss: 0.7111
+Gradients for fc_project_2_to_hidden.weight: 0.008365501649677753
+Gradients for fc_project_2_to_hidden.bias: 0.011424395255744457
+Gradients for RNN.weight_ih_l0: 0.6438888311386108
+Gradients for RNN.weight_hh_l0: 0.1319793462753296
+Gradients for RNN.bias_ih_l0: 0.12261616438627243
+Gradients for RNN.bias_hh_l0: 0.12261616438627243
+Gradients for RNN.weight_ih_l1: 0.401280015707016
+Gradients for RNN.weight_hh_l1: 0.40999308228492737
+Gradients for RNN.bias_ih_l1: 0.2925490438938141
+Gradients for RNN.bias_hh_l1: 0.2925490438938141
+Gradients for fc_project_hidden_to_input.weight: 0.1625751405954361
+Gradients for fc_project_hidden_to_input.bias: 0.10486992448568344
+Epoch 6, LR: 0.001
+Epoch 7, Loss: 1.3975, Validation Loss: 0.7109
+Gradients for fc_project_2_to_hidden.weight: 0.007049936335533857
+Gradients for fc_project_2_to_hidden.bias: 0.009516420774161816
+Gradients for RNN.weight_ih_l0: 0.7712986469268799
+Gradients for RNN.weight_hh_l0: 0.1442725658416748
+Gradients for RNN.bias_ih_l0: 0.09522505849599838
+Gradients for RNN.bias_hh_l0: 0.09522506594657898
+Gradients for RNN.weight_ih_l1: 0.3939273953437805
+Gradients for RNN.weight_hh_l1: 0.306974858045578
+Gradients for RNN.bias_ih_l1: 0.20302985608577728
+Gradients for RNN.bias_hh_l1: 0.20302985608577728
+Gradients for fc_project_hidden_to_input.weight: 0.1673186868429184
+Gradients for fc_project_hidden_to_input.bias: 0.07846985012292862
+Epoch 7, LR: 0.001
+Epoch 8, Loss: 1.3996, Validation Loss: 0.7115
+Gradients for fc_project_2_to_hidden.weight: 0.009188737720251083
+Gradients for fc_project_2_to_hidden.bias: 0.011334664188325405
+Gradients for RNN.weight_ih_l0: 0.7635781764984131
+Gradients for RNN.weight_hh_l0: 0.1258537620306015
+Gradients for RNN.bias_ih_l0: 0.12315364927053452
+Gradients for RNN.bias_hh_l0: 0.12315365672111511
+Gradients for RNN.weight_ih_l1: 0.392984002828598
+Gradients for RNN.weight_hh_l1: 0.28555017709732056
+Gradients for RNN.bias_ih_l1: 0.22189971804618835
+Gradients for RNN.bias_hh_l1: 0.22189973294734955
+Gradients for fc_project_hidden_to_input.weight: 0.16124460101127625
+Gradients for fc_project_hidden_to_input.bias: 0.10053853690624237
+Epoch 8, LR: 0.0003
+Epoch 9, Loss: 1.3704, Validation Loss: 0.6908
+Gradients for fc_project_2_to_hidden.weight: 0.013853317126631737
+Gradients for fc_project_2_to_hidden.bias: 0.017796946689486504
+Gradients for RNN.weight_ih_l0: 0.5885707139968872
+Gradients for RNN.weight_hh_l0: 0.09041127562522888
+Gradients for RNN.bias_ih_l0: 0.12546297907829285
+Gradients for RNN.bias_hh_l0: 0.12546297907829285
+Gradients for RNN.weight_ih_l1: 0.484967440366745
+Gradients for RNN.weight_hh_l1: 0.30773869156837463
+Gradients for RNN.bias_ih_l1: 0.34297576546669006
+Gradients for RNN.bias_hh_l1: 0.34297579526901245
+Gradients for fc_project_hidden_to_input.weight: 0.18497411906719208
+Gradients for fc_project_hidden_to_input.bias: 0.11850021034479141
+Epoch 9, LR: 0.0003
+Epoch 10, Loss: 1.3688, Validation Loss: 0.6866
+Gradients for fc_project_2_to_hidden.weight: 0.009229494258761406
+Gradients for fc_project_2_to_hidden.bias: 0.01242406852543354
+Gradients for RNN.weight_ih_l0: 0.5680550336837769
+Gradients for RNN.weight_hh_l0: 0.1294284164905548
+Gradients for RNN.bias_ih_l0: 0.11458104103803635
+Gradients for RNN.bias_hh_l0: 0.11458104103803635
+Gradients for RNN.weight_ih_l1: 0.4368085563182831
+Gradients for RNN.weight_hh_l1: 0.41327905654907227
+Gradients for RNN.bias_ih_l1: 0.33020225167274475
+Gradients for RNN.bias_hh_l1: 0.33020228147506714
+Gradients for fc_project_hidden_to_input.weight: 0.19561724364757538
+Gradients for fc_project_hidden_to_input.bias: 0.1270027607679367
+Epoch 10, LR: 0.0003
+
+
+with dropout = 2
+Number of training sequences: 6300
+Number of validation sequences: 1557
+Number of test sequences: 855
+Epoch 1, Loss: 3.1871, Validation Loss: 1.4244
+Gradients for fc_project_2_to_hidden.weight: 0.014242416247725487
+Gradients for fc_project_2_to_hidden.bias: 0.018654009327292442
+Gradients for RNN.weight_ih_l0: 0.7213262915611267
+Gradients for RNN.weight_hh_l0: 0.13586819171905518
+Gradients for RNN.bias_ih_l0: 0.16339609026908875
+Gradients for RNN.bias_hh_l0: 0.16339610517024994
+Gradients for RNN.weight_ih_l1: 0.4031335413455963
+Gradients for RNN.weight_hh_l1: 0.1872912347316742
+Gradients for RNN.bias_ih_l1: 0.2177743911743164
+Gradients for RNN.bias_hh_l1: 0.2177743911743164
+Gradients for fc_project_hidden_to_input.weight: 0.3145138621330261
+Gradients for fc_project_hidden_to_input.bias: 0.12615545094013214
+Epoch 1, LR: 0.001
+Epoch 2, Loss: 2.3768, Validation Loss: 1.1622
+Gradients for fc_project_2_to_hidden.weight: 0.007473942823708057
+Gradients for fc_project_2_to_hidden.bias: 0.00998716987669468
+Gradients for RNN.weight_ih_l0: 0.6183727383613586
+Gradients for RNN.weight_hh_l0: 0.12814730405807495
+Gradients for RNN.bias_ih_l0: 0.11492214351892471
+Gradients for RNN.bias_hh_l0: 0.11492214351892471
+Gradients for RNN.weight_ih_l1: 0.4502761662006378
+Gradients for RNN.weight_hh_l1: 0.3546871542930603
+Gradients for RNN.bias_ih_l1: 0.2825717628002167
+Gradients for RNN.bias_hh_l1: 0.28257179260253906
+Gradients for fc_project_hidden_to_input.weight: 0.2616027295589447
+Gradients for fc_project_hidden_to_input.bias: 0.13394737243652344
+Epoch 2, LR: 0.001
+Epoch 3, Loss: 2.3219, Validation Loss: 1.1597
+Gradients for fc_project_2_to_hidden.weight: 0.011187722906470299
+Gradients for fc_project_2_to_hidden.bias: 0.014709599316120148
+Gradients for RNN.weight_ih_l0: 0.6828640103340149
+Gradients for RNN.weight_hh_l0: 0.1520160436630249
+Gradients for RNN.bias_ih_l0: 0.14022691547870636
+Gradients for RNN.bias_hh_l0: 0.14022691547870636
+Gradients for RNN.weight_ih_l1: 0.41048693656921387
+Gradients for RNN.weight_hh_l1: 0.31327885389328003
+Gradients for RNN.bias_ih_l1: 0.25031593441963196
+Gradients for RNN.bias_hh_l1: 0.25031593441963196
+Gradients for fc_project_hidden_to_input.weight: 0.24697083234786987
+Gradients for fc_project_hidden_to_input.bias: 0.13403360545635223
+Epoch 3, LR: 0.001
+Epoch 4, Loss: 2.3159, Validation Loss: 1.1482
+Gradients for fc_project_2_to_hidden.weight: 0.00976466853171587
+Gradients for fc_project_2_to_hidden.bias: 0.011906144209206104
+Gradients for RNN.weight_ih_l0: 0.6803531050682068
+Gradients for RNN.weight_hh_l0: 0.1371305286884308
+Gradients for RNN.bias_ih_l0: 0.12903569638729095
+Gradients for RNN.bias_hh_l0: 0.12903571128845215
+Gradients for RNN.weight_ih_l1: 0.4595353305339813
+Gradients for RNN.weight_hh_l1: 0.3430328965187073
+Gradients for RNN.bias_ih_l1: 0.21596436202526093
+Gradients for RNN.bias_hh_l1: 0.21596437692642212
+Gradients for fc_project_hidden_to_input.weight: 0.22785240411758423
+Gradients for fc_project_hidden_to_input.bias: 0.10360829532146454
+Epoch 4, LR: 0.001
+Epoch 5, Loss: 2.3249, Validation Loss: 1.1053
+Gradients for fc_project_2_to_hidden.weight: 0.011201456189155579
+Gradients for fc_project_2_to_hidden.bias: 0.01492349337786436
+Gradients for RNN.weight_ih_l0: 0.6294872760772705
+Gradients for RNN.weight_hh_l0: 0.15156936645507812
+Gradients for RNN.bias_ih_l0: 0.14484012126922607
+Gradients for RNN.bias_hh_l0: 0.14484013617038727
+Gradients for RNN.weight_ih_l1: 0.4610440731048584
+Gradients for RNN.weight_hh_l1: 0.36661794781684875
+Gradients for RNN.bias_ih_l1: 0.2621564567089081
+Gradients for RNN.bias_hh_l1: 0.2621564567089081
+Gradients for fc_project_hidden_to_input.weight: 0.20384980738162994
+Gradients for fc_project_hidden_to_input.bias: 0.1117563247680664
+Epoch 5, LR: 0.001
+Epoch 6, Loss: 2.1759, Validation Loss: 0.9502
+Gradients for fc_project_2_to_hidden.weight: 0.02625356614589691
+Gradients for fc_project_2_to_hidden.bias: 0.03493503853678703
+Gradients for RNN.weight_ih_l0: 0.6260940432548523
+Gradients for RNN.weight_hh_l0: 0.09683924168348312
+Gradients for RNN.bias_ih_l0: 0.17039789259433746
+Gradients for RNN.bias_hh_l0: 0.17039790749549866
+Gradients for RNN.weight_ih_l1: 0.4579685628414154
+Gradients for RNN.weight_hh_l1: 0.1234881803393364
+Gradients for RNN.bias_ih_l1: 0.35707131028175354
+Gradients for RNN.bias_hh_l1: 0.35707128047943115
+Gradients for fc_project_hidden_to_input.weight: 0.19982194900512695
+Gradients for fc_project_hidden_to_input.bias: 0.136869415640831
+Epoch 6, LR: 0.001
+Epoch 7, Loss: 2.1618, Validation Loss: 0.9274
+Gradients for fc_project_2_to_hidden.weight: 0.006596274673938751
+Gradients for fc_project_2_to_hidden.bias: 0.009083893150091171
+Gradients for RNN.weight_ih_l0: 0.5670014023780823
+Gradients for RNN.weight_hh_l0: 0.12253144383430481
+Gradients for RNN.bias_ih_l0: 0.11737774312496185
+Gradients for RNN.bias_hh_l0: 0.11737773567438126
+Gradients for RNN.weight_ih_l1: 0.4699093699455261
+Gradients for RNN.weight_hh_l1: 0.4174172282218933
+Gradients for RNN.bias_ih_l1: 0.3068351745605469
+Gradients for RNN.bias_hh_l1: 0.3068351745605469
+Gradients for fc_project_hidden_to_input.weight: 0.19591164588928223
+Gradients for fc_project_hidden_to_input.bias: 0.11867932975292206
+Epoch 7, LR: 0.001
+Epoch 8, Loss: 2.1629, Validation Loss: 0.9318
+Gradients for fc_project_2_to_hidden.weight: 0.006264220457524061
+Gradients for fc_project_2_to_hidden.bias: 0.008459404110908508
+Gradients for RNN.weight_ih_l0: 0.6858488321304321
+Gradients for RNN.weight_hh_l0: 0.1392001509666443
+Gradients for RNN.bias_ih_l0: 0.13492140173912048
+Gradients for RNN.bias_hh_l0: 0.13492140173912048
+Gradients for RNN.weight_ih_l1: 0.44977813959121704
+Gradients for RNN.weight_hh_l1: 0.345147043466568
+Gradients for RNN.bias_ih_l1: 0.23249845206737518
+Gradients for RNN.bias_hh_l1: 0.2324984222650528
+Gradients for fc_project_hidden_to_input.weight: 0.18467432260513306
+Gradients for fc_project_hidden_to_input.bias: 0.10036585479974747
+Epoch 8, LR: 0.001
+Epoch 9, Loss: 2.1640, Validation Loss: 0.9164
+Gradients for fc_project_2_to_hidden.weight: 0.011647817678749561
+Gradients for fc_project_2_to_hidden.bias: 0.015559033490717411
+Gradients for RNN.weight_ih_l0: 0.5584897398948669
+Gradients for RNN.weight_hh_l0: 0.1005696952342987
+Gradients for RNN.bias_ih_l0: 0.14390888810157776
+Gradients for RNN.bias_hh_l0: 0.14390888810157776
+Gradients for RNN.weight_ih_l1: 0.5182265639305115
+Gradients for RNN.weight_hh_l1: 0.29734811186790466
+Gradients for RNN.bias_ih_l1: 0.32573336362838745
+Gradients for RNN.bias_hh_l1: 0.32573336362838745
+Gradients for fc_project_hidden_to_input.weight: 0.22843283414840698
+Gradients for fc_project_hidden_to_input.bias: 0.12172333151102066
+Epoch 9, LR: 0.001
+Epoch 10, Loss: 2.1585, Validation Loss: 0.9178
+Gradients for fc_project_2_to_hidden.weight: 0.009030339308083057
+Gradients for fc_project_2_to_hidden.bias: 0.012386349961161613
+Gradients for RNN.weight_ih_l0: 0.5786997675895691
+Gradients for RNN.weight_hh_l0: 0.10995982587337494
+Gradients for RNN.bias_ih_l0: 0.10448238253593445
+Gradients for RNN.bias_hh_l0: 0.10448238253593445
+Gradients for RNN.weight_ih_l1: 0.4944584369659424
+Gradients for RNN.weight_hh_l1: 0.280079185962677
+Gradients for RNN.bias_ih_l1: 0.35438239574432373
+Gradients for RNN.bias_hh_l1: 0.35438236594200134
+Gradients for fc_project_hidden_to_input.weight: 0.1987060010433197
+Gradients for fc_project_hidden_to_input.bias: 0.1317398101091385
+Epoch 10, LR: 0.001

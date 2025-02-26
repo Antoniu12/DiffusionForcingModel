@@ -31,67 +31,78 @@ from plots import TrainingPlotter
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #print(device)
 def forward_diffuse(xt, kt, alpha):
-    sqrt = torch.sqrt(alpha[kt])
-    sqrt2 = torch.sqrt(1-alpha[kt])
+    # print(f"Before diffusion: xt shape = {xt.shape}")  #[1, 24, 16]
+
+    sqrt1 = torch.sqrt(torch.clamp(alpha[kt], min=1e-8)).unsqueeze(-1)
+    sqrt2 = torch.sqrt(torch.clamp(1 - alpha[kt], min=1e-8)).unsqueeze(-1)
     noise = torch.randn_like(xt)
-    return sqrt * xt + sqrt2 * noise
+    xt_noisy = sqrt1 * xt + sqrt2 * noise
+
+    # print(f"After diffusion: xt_noisy shape = {xt_noisy.shape}")  #[1, 24, 16]
+
+    return xt_noisy
 
 def df_training(model, data, validation_data, alpha, K, epochs):
     #model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr = 1e-3)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=3, factor=0.5, verbose=True)
-
-    #loss_function = nn.MSELoss()
-    loss_function = nn.SmoothL1Loss()
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.3, threshold=0.001)
+    loss_function = nn.MSELoss()
+    #loss_function = nn.SmoothL1Loss()
 
     plotter = TrainingPlotter()
 
     for epoch in range(epochs):
         epoch_loss, epoch_r2, epoch_smape = 0, 0, 0
-        zt_prev = torch.zeros((1, 24 , model.fc.in_features))#.to(device)
+        model.train()
+        zt_prev = torch.zeros((1, model.fc_project_seq_to_hidden.in_features , model.fc_project_seq_to_hidden.out_features))#.to(device)
 
         for trajectory in data:
-            xt, _ = trajectory
+            xt = trajectory
             #xt = xt.to(device)
 
             #print(f"trajectory: {trajectory}")
             optimizer.zero_grad()
-            #t = 0
-            #print(f"Iteration: {t}")
-            #t+=1
-            #print(f"xt: {xt}")
+            # t = 0
+            # print(f"Iteration: {t}")
+            # t+=1
+            # print(f"xt: {xt}")
 
             # print(f"zt_prev shape: {zt_prev.shape}")
+            # print(f"Before unsqeeze: xt shape = {xt.shape}")
 
             xt = xt.unsqueeze(0)
-            xt = model.fc_project(xt)
+            # print(f"After unsqeeze: xt shape = {xt.shape}")
+
+            #print(f"Before fc_project: xt shape = {xt.shape}")
+            xt = model.fc_project_2_to_hidden(xt)
+            #print(f"After fc_project: xt shape = {xt.shape}")
 
             # print(f"xt shape: {xt.shape}")
 
-            kt = torch.randint(0, K, (1,)).item()
+            kt = torch.randint(0, K, (xt.shape[0], xt.shape[1]))
             xt_noisy = forward_diffuse(xt, kt, alpha)
-            # print(f"xt_noisy shape: {xt_noisy.shape}")
+            # print(f"After forward_diffuse: xt_noisy shape = {xt_noisy.shape}")
 
-            sqrt = torch.sqrt(alpha[kt])
-            sqrt2 = torch.sqrt(torch.clamp(1 - alpha[kt], min=1e-8))
 
-            epsilon_true = (xt_noisy - sqrt * xt) / sqrt2
-            epsilon_pred, zt_prev = model(zt_prev, xt_noisy)
-            zt_prev = zt_prev.detach()
+            sqrt1 = torch.sqrt(torch.clamp(alpha[kt], min=1e-8)).unsqueeze(-1)
+            sqrt2 = torch.sqrt(torch.clamp(1 - alpha[kt], min=1e-8)).unsqueeze(-1)
 
-            #gamma = 0.9
-            #zt_prev = gamma * zt_prev + (1 - gamma) * epsilon_pred[..., -16:]
-            #zt_prev = zt_prev.clone().detach()
-            epsilon_pred = epsilon_pred[..., -16:]
+            epsilon_true = (xt_noisy - sqrt1 * xt) / sqrt2
+            xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha)
+            zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach() # de verificat !!!!
+
 
             # print(epsilon_pred.shape)
             # print(epsilon_true.shape)
             trajectory_loss = loss_function(epsilon_pred, epsilon_true)
+            xt_loss = loss_function(xt_pred, xt)
+            total_loss = trajectory_loss + xt_loss
 
-            trajectory_loss.backward()
+            total_loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
 
-            epoch_loss += trajectory_loss.item()
+            epoch_loss += total_loss.item()
 
         model.eval()
         val_loss = 0
@@ -99,59 +110,71 @@ def df_training(model, data, validation_data, alpha, K, epochs):
             r2_loss = R2Score()  # .to(device)
             smape_loss = SymmetricMeanAbsolutePercentageError()  # .to(device)
 
-            zt_prev = torch.zeros((1, 24, model.fc.in_features))
+            zt_prev = torch.zeros((1, model.fc_project_seq_to_hidden.in_features, model.fc_project_seq_to_hidden.out_features))  # .to(device)
             for trajectory in validation_data:
-                xt, _ = trajectory
-
+                xt = trajectory
                 xt = xt.unsqueeze(0)
-                xt = model.fc_project(xt)
+                xt = model.fc_project_2_to_hidden(xt)
 
-                kt = torch.randint(0, K, (1,)).item()
+                kt = torch.randint(0, K, (xt.shape[0], xt.shape[1]))
                 xt_noisy = forward_diffuse(xt, kt, alpha)
-                sqrt = torch.sqrt(alpha[kt])
-                sqrt2 = torch.sqrt(torch.clamp(1 - alpha[kt], min=1e-8))
-                epsilon_true = (xt_noisy - sqrt * xt) / sqrt2
 
-                output, zt_prev = model(zt_prev, xt_noisy)
+                sqrt1 = torch.sqrt(torch.clamp(alpha[kt], min=1e-8)).unsqueeze(-1)
+                sqrt2 = torch.sqrt(torch.clamp(1 - alpha[kt], min=1e-8)).unsqueeze(-1)
+                epsilon_true = (xt_noisy - sqrt1 * xt) / sqrt2
+                xt_pred, output, zt_updated = model(zt_prev, xt_noisy, kt, alpha)
+                zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
 
-                #zt_prev_updated = output[..., :-16]
-                #zt_prev = zt_prev_updated.clone().detach()
-                output = output[..., -16:]
+                trajectory_loss = loss_function(output, epsilon_true)
+                xt_loss = loss_function(xt_pred, xt)
+                total_loss = trajectory_loss + xt_loss
 
-                loss = loss_function(output, epsilon_true)
                 r2_value = r2_loss(output.reshape(-1), epsilon_true.reshape(-1))
                 smape_value = smape_loss(output, epsilon_true)
 
-                val_loss += loss.item()
+                val_loss += total_loss.item()
                 epoch_r2 += r2_value.item()
                 epoch_smape += smape_value.item()
 
         scheduler.step(val_loss / len(validation_data))
 
-        plotter.update_metrics(val_loss / len(validation_data), epoch_r2 / len(validation_data), epoch_smape / len(validation_data), epsilon_pred,
-                                   epsilon_true)
+        plotter.update_metrics(val_loss / len(validation_data), epoch_r2 / len(validation_data), epoch_smape / len(validation_data), epsilon_pred, epsilon_true)
 
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.4f}, Validation Loss: {val_loss / len(validation_data):.4f}")
         # for name, param in model.named_parameters():
         #     if param.grad is not None:
         #         print(f"Gradients for {name}: {param.grad.norm().item()}")
+        for param_group in optimizer.param_groups:
+            print(f"Epoch {epoch + 1}, LR: {param_group['lr']}")
     plotter.plot_metrics()
 class DFModel(nn.Module):
-    def __init__(self, input_dim, hidden_dim):
+    def __init__(self, input_dim, hidden_dim, seq_dim):
         super().__init__()
-        self.fc_project = nn.Linear(2, hidden_dim)
-        self.RNN = nn.RNN(input_dim, hidden_dim, batch_first=True, dropout = 0.1)
+        self.fc_project_2_to_hidden = nn.Linear(7, hidden_dim)
+        self.RNN = nn.RNN(hidden_dim * 2, hidden_dim, num_layers = 2, batch_first=True, dropout = 0.2)
         #self.RNN = nn.LSTM(input_dim, hidden_dim, num_layers=2, batch_first=True)#, dropout=0.1)
         #self.RNN = nn.GRU(input_dim, hidden_dim, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, input_dim)
         self.zt_transition = nn.GRU(hidden_dim, hidden_dim, batch_first=True)
+        self.fc_project_hidden_to_input = nn.Linear(hidden_dim, input_dim)
+        self.fc_project_seq_to_hidden = nn.Linear(seq_dim, hidden_dim)
 
+    def forward(self, zt_prev, xt_noisy, kt, alpha):
+        # print(f"xt_noisy shape: {xt_noisy.shape}")
+        # print(f"fc_project weight shape: {self.fc_project.weight.shape}")
 
-    def forward(self, zt_prev, xt_noisy):
         input = torch.cat([zt_prev, xt_noisy], dim=-1)
         # print(f"input shape: {input.shape}")
         output, _ = self.RNN(input)
         zt_updated, _ = self.zt_transition(output)
+        epsilon_pred = self.fc_project_hidden_to_input(output)
 
-        return self.fc(output), zt_updated
+        sqrt1 = torch.sqrt(torch.clamp(alpha[kt], min=1e-8)).unsqueeze(-1)
+        sqrt2 = torch.sqrt(torch.clamp(1 - alpha[kt], min=1e-8)).unsqueeze(-1)
+        # print(f"epsilon_pred shape: {epsilon_pred.shape}")
+        # print(f"xt_noisy shape: {xt_noisy.shape}")
+        # print(f"sqrt1 shape: {sqrt1.shape}")
+        # print(f"sqrt2 shape: {sqrt2.shape}")
 
+        xt_pred = (xt_noisy - sqrt2 * epsilon_pred) / sqrt1
+
+        return xt_pred, epsilon_pred, zt_updated
