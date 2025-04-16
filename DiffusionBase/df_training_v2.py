@@ -54,7 +54,7 @@ def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs):
 
             trajectory_loss = loss_function(epsilon_pred, epsilon_true)
             xt_loss = loss_function(model.fc_project_xt_output(xt_pred), x0)
-            total_loss = trajectory_loss * 0.5 + xt_loss * 0.5
+            total_loss = trajectory_loss * 0.3 + xt_loss * 0.7
 
             total_loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -84,7 +84,7 @@ def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs):
                 epsilon_true = (xt_noisy - torch.sqrt(alpha_bar[kt].view(1, -1, 1)) * xt) / torch.sqrt(1 - alpha_bar[kt].view(1, -1, 1))
 
                 xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
-                zt_prev = 0.9 * zt_prev + 0.1 * zt_updated.detach()
+                zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
 
                 ### MODEL EVAL
                 epsilon_loss = loss_function(epsilon_pred, epsilon_true)
@@ -111,7 +111,7 @@ def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs):
 
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.4f}, Validation Loss: {val_loss / len(validation_data):.4f}")
         for param_group in optimizer.param_groups:
-            print(f"Epoch {epoch + 1}, LR: {param_group['lr']}")
+            print(f"Epoch {epoch + 1}, LR: {param_group['lr']:.4f}")
 
     plotter.plot_metrics()
 
@@ -135,7 +135,7 @@ def predict(model, test_data, alpha, alpha_bar, K, scaler):
             epsilon_true = (xt_noisy - torch.sqrt(alpha_bar[kt].view(1, -1, 1)) * xt) / torch.sqrt(1 - alpha_bar[kt].view(1, -1, 1))
 
             xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
-            zt_prev = 0.9 * zt_prev + 0.1 * zt_updated.detach()
+            zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
 
             xt_pred_full = model.fc_project_xt_output(xt_pred)
 
@@ -157,10 +157,6 @@ class DFModel(nn.Module):
         self.fc_project_seq_to_hidden = nn.Linear(seq_dim, hidden_dim)
         self.fc_project_hidden_to_xt = nn.Linear(hidden_dim, input_dim)
         self.fc_project_hidden_to_epsilon = nn.Linear(hidden_dim, input_dim)
-        # self.fc_project_xt_output = nn.Sequential(
-        #     nn.Linear(hidden_dim, 7)
-        #     # nn.Sigmoid()
-        # )
         self.fc_project_xt_output = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),

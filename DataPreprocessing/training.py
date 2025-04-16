@@ -50,7 +50,7 @@ train_data, validation_data = train_test_split(aux_data, test_size=0.2, shuffle 
 train_tensor = torch.tensor(train_data[['year', 'month', 'day', ' Consumption(Wh)', 'trend', 'seasonal', 'residual']].values, dtype=torch.float32)
 validation_tensor = torch.tensor(validation_data[['year', 'month', 'day', ' Consumption(Wh)', 'trend', 'seasonal', 'residual']].values, dtype=torch.float32)
 test_tensor = torch.tensor(test_data[['year', 'month', 'day', ' Consumption(Wh)', 'trend', 'seasonal', 'residual']].values, dtype=torch.float32)
-print("test_data: ", test_tensor[:, 3])
+# print("test_data: ", test_tensor[:, 3])
 def create_sequences(data_tensor, seq_length):
     sequences = []
     for i in range(len(data_tensor) - seq_length):
@@ -69,7 +69,7 @@ print(f"Number of test sequences: {len(test_sequences)}")
 input_dim = 32
 hidden_dim = 128
 K = 1000
-epochs = 5
+epochs = 20
 betas = utils.cosine_beta_schedule(K)
 alpha, alpha_bar = utils.get_alphas(betas)
 

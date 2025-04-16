@@ -43,46 +43,84 @@ class TrainingPlotter:
         self.plot_and_save(epochs, self.smape_score_list, "SMAPE (%)", "SMAPE (%)", "Training SMAPE Over Epochs", "smape.png")
 
 def plot_test_predictions(test_results, scaler):
+    from collections import defaultdict
+
     save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
     os.makedirs(save_dir, exist_ok=True)
 
-    true_flat = []
-    pred_flat = []
-    epsilon_true_all, epsilon_pred_all = [], []
+    # Store predictions and true values by global timestep
+    pred_dict = defaultdict(list)
+    true_dict = {}
+
+    global_timestep = 0  # current global position
 
     for idx, (xt_true, xt_pred, epsilon_pred, epsilon_true) in enumerate(test_results):
-        # xt_true = scaler.inverse_transform(xt_true)
-        # xt_pred = scaler.inverse_transform(xt_pred)
+        seq_len = xt_true.shape[0]
 
-        true_vals = xt_true[:, 3]
-        pred_vals = xt_pred[:, 3]
+        for i in range(seq_len):
+            t = global_timestep + i
+            pred_dict[t].append(xt_pred[i, 3])
 
-        if idx < len(test_results) - 1:
-            true_flat.append(true_vals[0])
-            pred_flat.append(pred_vals[0])
-        else:
-            true_flat.extend(true_vals)
-            pred_flat.extend(pred_vals)
+            # Only store true once per timestep
+            if t not in true_dict:
+                true_dict[t] = xt_true[i, 3]
 
-        epsilon_true_all.append(epsilon_true)
-        epsilon_pred_all.append(epsilon_pred)
+        global_timestep += 1  # sliding by 1 step
 
-    # Plot xt
-    trace_true = go.Scatter(y=true_flat, mode='lines', name='True Consumption')
-    trace_pred = go.Scatter(y=pred_flat, mode='lines', name='Predicted Consumption')
-    fig_xt = go.Figure(data=[trace_true, trace_pred])
+    # Sort timesteps
+    timesteps = sorted(true_dict.keys())
+
+    true_flat = [true_dict[t] for t in timesteps]
+    pred_mean = [np.mean(pred_dict[t]) for t in timesteps]
+    pred_min = [np.min(pred_dict[t]) for t in timesteps]
+    pred_max = [np.max(pred_dict[t]) for t in timesteps]
+
+    # Build Plotly traces
+    trace_true = go.Scatter(
+        x=timesteps, y=true_flat,
+        mode='lines', name='True Consumption',
+        line=dict(color='rgb(30, 144, 255)', width=2)
+    )
+    trace_pred = go.Scatter(
+        x=timesteps, y=pred_mean,
+        mode='lines', name='Predicted Consumption',
+        line=dict(color='rgb(220, 20, 60)', width=2)
+    )
+    trace_interval_min = go.Scatter(
+        x=timesteps, y=pred_min,
+        mode='lines', line=dict(color='rgba(255,140,0,0.0)'),
+        showlegend=False
+    )
+    trace_interval_max = go.Scatter(
+        x=timesteps, y=pred_max,
+        mode='lines', fill='tonexty',
+        fillcolor='rgba(255,140,0,0.3)',
+        line=dict(color='rgba(255,140,0,0.0)'),
+        name='Prediction Interval'
+    )
+
+    fig_xt = go.Figure(data=[
+        trace_interval_min,
+        trace_interval_max,
+        trace_pred,
+        trace_true
+    ])
     fig_xt.update_layout(
-        title="Flattened True vs. Predicted Consumption (Correctly Joined)",
+        title="True vs. Predicted Consumption with Interval",
         xaxis_title="Time Steps",
         yaxis_title="Consumption (Wh)",
         legend=dict(x=0, y=1.1, orientation='h'),
     )
-    pio.write_html(fig_xt, file=os.path.join(save_dir, "xt_consumption_plotly.html"), auto_open=True)
+    pio.write_html(fig_xt, file=os.path.join(save_dir, "xt_consumption_interval_plotly.html"), auto_open=True)
 
     # Plot noise
+    epsilon_true_all = [e for _, _, _, e in test_results]
+    epsilon_pred_all = [e for _, _, e, _ in test_results]
     epsilon_true_flat, epsilon_pred_flat = plotting_preprocess_epsilon(epsilon_true_all, epsilon_pred_all)
+
     trace_eps_true = go.Scatter(y=epsilon_true_flat, mode='lines', name='True Noise (Avg)', line=dict(color='green'))
     trace_eps_pred = go.Scatter(y=epsilon_pred_flat, mode='lines', name='Predicted Noise (Avg)', line=dict(color='orange'))
+
     fig_eps = go.Figure(data=[trace_eps_true, trace_eps_pred])
     fig_eps.update_layout(
         title="Averaged Noise over All Features",
