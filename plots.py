@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objs as go
 import plotly.io as pio
 
-from utils import plotting_preprocess_xt, plotting_preprocess_epsilon
+from utils import plotting_preprocess_epsilon
 
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
@@ -33,7 +33,7 @@ class TrainingPlotter:
         plt.title(title)
         plt.legend()
         plt.grid(True)
-        plt.savefig(os.path.join(self.save_dir, filename))  # Save plot
+        plt.savefig(os.path.join(self.save_dir, filename))
         plt.show()
 
     def plot_metrics(self):
@@ -61,7 +61,6 @@ def plot_test_predictions(test_results, scaler):
             t = global_timestep + i
             pred_dict[t].append(xt_pred[i, 3])
 
-            # Only store true once per timestep
             if t not in true_dict:
                 true_dict[t] = xt_true[i, 3]
 
@@ -71,7 +70,7 @@ def plot_test_predictions(test_results, scaler):
     timesteps = sorted(true_dict.keys())
 
     true_flat = [true_dict[t] for t in timesteps]
-    pred_mean = [np.mean(pred_dict[t]) for t in timesteps]
+    pred_first = [pred_dict[t][0] for t in timesteps]
     pred_min = [np.min(pred_dict[t]) for t in timesteps]
     pred_max = [np.max(pred_dict[t]) for t in timesteps]
 
@@ -82,7 +81,7 @@ def plot_test_predictions(test_results, scaler):
         line=dict(color='rgb(30, 144, 255)', width=2)
     )
     trace_pred = go.Scatter(
-        x=timesteps, y=pred_mean,
+        x=timesteps, y=pred_first,
         mode='lines', name='Predicted Consumption',
         line=dict(color='rgb(220, 20, 60)', width=2)
     )
@@ -129,3 +128,94 @@ def plot_test_predictions(test_results, scaler):
         legend=dict(x=0, y=1.1, orientation='h'),
     )
     pio.write_html(fig_eps, file=os.path.join(save_dir, "epsilon_noise_plotly.html"), auto_open=True)
+
+def plot_predictions_with_uncertainty(predictions):
+    import plotly.graph_objs as go
+    import plotly.io as pio
+    import os
+    from datetime import datetime
+
+    save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
+    os.makedirs(save_dir, exist_ok=True)
+
+    timesteps = predictions["timesteps"]
+    xt_true_all = predictions["xt_true"]
+    xt_pred_all = predictions["xt_pred_mean"]
+    xt_std_all = predictions["xt_pred_std"]
+
+    # STD band (68% confidence)
+    xt_upper_std = [m + s for m, s in zip(xt_pred_all, xt_std_all)]
+    xt_lower_std = [m - s for m, s in zip(xt_pred_all, xt_std_all)]
+
+    # 95% confidence band
+    xt_upper_95 = [m + 1.96 * s for m, s in zip(xt_pred_all, xt_std_all)]
+    xt_lower_95 = [m - 1.96 * s for m, s in zip(xt_pred_all, xt_std_all)]
+
+    # Plotting
+    trace_true = go.Scatter(
+        x=timesteps, y=xt_true_all,
+        mode='lines', name='True Consumption',
+        line=dict(color='rgb(30, 144, 255)', width=2)
+    )
+    trace_pred = go.Scatter(
+        x=timesteps, y=xt_pred_all,
+        mode='lines', name='Predicted Mean',
+        line=dict(color='rgb(220, 20, 60)', width=2)
+    )
+
+    # 95% confidence interval
+    trace_band_lower_95 = go.Scatter(
+        x=timesteps,
+        y=xt_lower_95,
+        mode='lines',
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip'
+    )
+    trace_band_upper_95 = go.Scatter(
+        x=timesteps,
+        y=xt_upper_95,
+        mode='lines',
+        fill='tonexty',
+        fillcolor='rgba(255, 140, 0, 0.15)',
+        line=dict(width=0),
+        name='95% Confidence Interval',
+        hoverinfo='skip'
+    )
+
+    # ±1 STD interval (front)
+    trace_band_lower_std = go.Scatter(
+        x=timesteps,
+        y=xt_lower_std,
+        mode='lines',
+        line=dict(width=0),
+        showlegend=False,
+        hoverinfo='skip'
+    )
+    trace_band_upper_std = go.Scatter(
+        x=timesteps,
+        y=xt_upper_std,
+        mode='lines',
+        fill='tonexty',
+        fillcolor='rgba(255, 140, 0, 0.3)',
+        line=dict(width=0),
+        name='68% Confidence Interval (±1 STD)',
+        hoverinfo='skip'
+    )
+
+    fig = go.Figure(data=[
+        trace_band_lower_95,
+        trace_band_upper_95,
+        trace_band_lower_std,
+        trace_band_upper_std,
+        trace_pred,
+        trace_true
+    ])
+    fig.update_layout(
+        title="Forecast with MC Dropout Uncertainty",
+        xaxis_title="Time Step",
+        yaxis_title="Consumption (Wh)",
+        legend=dict(x=0, y=1.1, orientation='h')
+    )
+
+    pio.write_html(fig, file=os.path.join(save_dir, "xt_mc_uncertainty.html"), auto_open=True)

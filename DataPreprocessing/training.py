@@ -3,11 +3,13 @@ import torch
 from sklearn.model_selection import train_test_split
 
 import utils
-from DiffusionBase.df_training_v2 import DFModel, df_training, predict
+from DiffusionBase.DF_Backbone import DFBackbone
+from DiffusionBase.df_training_v2 import df_training, predict, predict_with_uncertainty
 from sklearn.preprocessing import MinMaxScaler
 from statsmodels.tsa.seasonal import seasonal_decompose
 
-from plots import plot_test_predictions
+from plots import plot_test_predictions, plot_predictions_with_uncertainty
+
 #confidence interval!!!
 #device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -35,7 +37,6 @@ data['seasonal'] = decomposition.seasonal.fillna(0).cumsum()
 data['residual'] = decomposition.resid.fillna(0).cumsum()
 #data leakage
 #trend residual din residuals
-#xi+1 trend pan ala xi
 
 data_normalised = data.copy()
 scaler = MinMaxScaler()
@@ -69,11 +70,13 @@ print(f"Number of test sequences: {len(test_sequences)}")
 input_dim = 32
 hidden_dim = 128
 K = 1000
-epochs = 20
+epochs = 50
 betas = utils.cosine_beta_schedule(K)
 alpha, alpha_bar = utils.get_alphas(betas)
 
-model = DFModel(input_dim=input_dim, hidden_dim=hidden_dim, seq_dim=seq_length)#.to(device)
-df_training(model, train_sequences, validation_sequences, alpha, alpha_bar, K, epochs)
+model = DFBackbone(input_dim=input_dim, hidden_dim=hidden_dim, seq_dim=seq_length)#.to(device)
+df_training(model, train_sequences, validation_sequences, alpha, alpha_bar, K, epochs, loss="dinamic")
 test_results = predict(model, test_sequences, alpha, alpha_bar, K, scaler)
 plot_test_predictions(test_results, scaler)
+test_results2 = predict_with_uncertainty(model, test_sequences, alpha, alpha_bar, K, scaler)
+plot_predictions_with_uncertainty(test_results2)
