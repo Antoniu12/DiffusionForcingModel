@@ -2,3 +2,7 @@ am creat custom loss
 am adaugat k embedding in rnn pentru a face modelul aware de nivelul de noise
 am modificat weight la dinamic (0.7 pe consum si 0.3 pe tot xt) + epsilon
 am adaugat un weight loss dinamic 0.7->0.9 la xt si 0.3->0.1 la noisie
+am avut rezutate mai rele cu noise embbedding
+am adaugat hubert loss => flatline nu e bun
+
+stepLR produce flatline din cauza sudden change

@@ -2,11 +2,10 @@ import matplotlib
 import numpy as np
 from datetime import datetime
 import os
-import matplotlib.pyplot as plt
 import plotly.graph_objs as go
 import plotly.io as pio
 
-from utils import plotting_preprocess_epsilon
+from utils.utils import plotting_preprocess_epsilon
 
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
@@ -15,14 +14,17 @@ class TrainingPlotter:
     def __init__(self):
         self.mse_loss_list = []
         self.r2_score_list = []
+        self.r2_score_listxt = []
+
         self.smape_score_list = []
 
         self.save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
         os.makedirs(self.save_dir, exist_ok=True)
 
-    def update_metrics(self, mse, r2, smape):
+    def update_metrics(self, mse, r2, r2xt, smape):
         self.mse_loss_list.append(mse)
         self.r2_score_list.append(r2)
+        self.r2_score_listxt.append(r2xt)
         self.smape_score_list.append(smape)
 
     def plot_and_save(self, x, y, label, ylabel, title, filename):
@@ -39,7 +41,8 @@ class TrainingPlotter:
     def plot_metrics(self):
         epochs = range(1, len(self.mse_loss_list) + 1)
         self.plot_and_save(epochs, self.mse_loss_list, "MSE Loss", "MSE Loss", "Training MSE Loss Over Epochs", "mse_loss.png")
-        self.plot_and_save(epochs, self.r2_score_list, "R² Score", "R² Score", "Training R² Score Over Epochs", "r2_score.png")
+        self.plot_and_save(epochs, self.r2_score_listxt, "R² Score xt ", "R² Score", "Training R² xt Score Over Epochs", "r2_score_xt.png")
+        self.plot_and_save(epochs, self.r2_score_list, "R² Score epsilon", "R² Score", "Training R² epsilin Score Over Epochs", "r2_score.png")
         self.plot_and_save(epochs, self.smape_score_list, "SMAPE (%)", "SMAPE (%)", "Training SMAPE Over Epochs", "smape.png")
 
 def plot_test_predictions(test_results, scaler):

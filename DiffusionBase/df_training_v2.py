@@ -1,14 +1,13 @@
 import random
 
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.optim as optim
+from adabelief_pytorch import AdaBelief
 from torchmetrics import R2Score
 from torchmetrics.regression import SymmetricMeanAbsolutePercentageError
 
 from plots import TrainingPlotter
-from utils import custom_loss, get_scheduled_k
+from utils.utils import custom_loss, get_scheduled_k
 
 
 def forward_diffuse(x_start, k, alpha_bar):
@@ -18,14 +17,28 @@ def forward_diffuse(x_start, k, alpha_bar):
     sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
     return sqrt_alpha_bar * x_start + sqrt_one_minus_alpha_bar * noise
 
-def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs, loss):
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+def df_training(model, data, validation_data, alpha_bar, K, epochs, loss):
+    #optimizer = optim.AdamW(model.parameters(), lr=1e-3)
+    optimizer = AdaBelief(
+        model.parameters(),
+        lr=5e-4,
+        eps=1e-16,
+        betas=(0.9, 0.999),
+        weight_decay=1e-2,
+        rectify=True,
+        weight_decouple=True,
+        print_change_log=False
+    )
+
+    #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.3, threshold=0.001)
-    loss_function = nn.MSELoss()
+    #scheduler = StepLR(optimizer, step_size=20, gamma=0.5)
+    # scheduler = CustomCosineLRScheduler(optimizer, total_epochs=epochs, base_lr=1e-3, min_lr=1e-5)
+
     plotter = TrainingPlotter()
 
     for epoch in range(epochs):
-        epoch_loss, epoch_r2, epoch_smape = 0, 0, 0
+        epoch_loss, epoch_r2, epoch_r2xt, epoch_smape = 0, 0, 0, 0
         model.train()
         zt_prev = torch.zeros((1, model.fc_project_seq_to_hidden.in_features,
                                model.fc_project_seq_to_hidden.out_features))
@@ -37,14 +50,13 @@ def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs, loss)
 
             k_min, k_max = get_scheduled_k(epoch, epochs, K, min_k=100, max_k=K - 1)
             kt = torch.full((xt.shape[0], xt.shape[1]), random.randint(k_min, k_max))
-            # kt = torch.full((xt.shape[0], xt.shape[1]), 200)
 
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
             epsilon_true = (xt_noisy - torch.sqrt(alpha_bar[kt].view(1, -1, 1)) * xt) / torch.sqrt(1 - alpha_bar[kt].view(1, -1, 1))
 
             xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
-            zt_prev = 0.9 * zt_prev + 0.1 * zt_updated.detach()
+            zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
 
             xt_true = x0
             xt_pred = model.fc_project_xt_output(xt_pred)
@@ -71,7 +83,6 @@ def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs, loss)
                 xt = model.fc_project_2_to_hidden(x0)
                 k_min, k_max = get_scheduled_k(epoch, epochs, K, min_k=100, max_k=K - 1)
                 kt = torch.full((xt.shape[0], xt.shape[1]), random.randint(k_min, k_max))
-                # kt = torch.full((xt.shape[0], xt.shape[1]), 200)
 
                 xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
@@ -86,10 +97,12 @@ def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs, loss)
                 val_loss += custom_loss(epsilon_pred, epsilon_true, xt_out, x0, kt, alpha_bar, epoch, epochs, loss)
 
                 r2_eps_val = r2_eps(epsilon_pred.reshape(-1), epsilon_true.reshape(-1))
-                r2_xt_val = r2_xt(xt_out.reshape(-1), x0.reshape(-1))
+
+                r2_xt_val = r2_xt(xt_out[:, :, 3].reshape(-1), x0[:, :, 3].reshape(-1))
                 smape_eps_val = smape_eps(epsilon_pred.reshape(-1), epsilon_true.reshape(-1))
                 smape_xt_val = smape_xt(model.fc_project_xt_output(xt_pred).reshape(-1), x0.reshape(-1))
-                epoch_r2 += r2_eps_val.item() * 0.5 + r2_xt_val * 0.5
+                epoch_r2 += r2_eps_val.item()
+                epoch_r2xt += r2_xt_val.item()
                 epoch_smape += smape_eps_val.item() * 0.5 + smape_xt_val * 0.5
                 ###
 
@@ -97,6 +110,7 @@ def df_training(model, data, validation_data, alpha, alpha_bar, K, epochs, loss)
 
         plotter.update_metrics(val_loss / len(validation_data),
                                epoch_r2 / len(validation_data),
+                               epoch_r2xt / len(validation_data),
                                epoch_smape / len(validation_data))
 
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.4f}, Validation Loss: {val_loss / len(validation_data):.4f}")
@@ -117,7 +131,6 @@ def predict(model, test_data, alpha, alpha_bar, K, scaler):
             x0 = trajectory.unsqueeze(0)
             xt = model.fc_project_2_to_hidden(x0)
             kt = torch.full((xt.shape[0], xt.shape[1]), random.randrange(0, K))
-            # kt = torch.full((xt.shape[0], xt.shape[1]), 200)
 
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
@@ -157,7 +170,6 @@ def predict_with_uncertainty(model, test_data, alpha, alpha_bar, K, scaler, T=30
         for i, trajectory in enumerate(test_data):
             x0 = trajectory.unsqueeze(0)
             xt = model.fc_project_2_to_hidden(x0)
-            # kt = torch.full((xt.shape[0], xt.shape[1]), 200)
             kt = torch.full((xt.shape[0], xt.shape[1]), random.randrange(0, K))
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
