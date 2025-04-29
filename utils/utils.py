@@ -1,8 +1,11 @@
 import math
+import os
+from datetime import datetime
+
 import numpy as np
-import pysdtw
 import torch
 import torch.nn.functional as F
+from properscoring import crps_gaussian
 
 def cosine_beta_schedule(timesteps, s=0.008):
     """
@@ -51,9 +54,9 @@ def plotting_preprocess_epsilon(epsilon_true_all, epsilon_pred_all):
     epsilon_pred_flat = np.concatenate(epsilon_pred_avg)
     return epsilon_true_flat, epsilon_pred_flat
 
-def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, kt, alpha_bar, epoch, epochs, loss):
-    if loss == "snr":
-        adaptive_weight = get_dynamic_loss_weights(epoch, epochs)
+def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, kt, alpha_bar, epoch, total_epochs, loss_type):
+    if loss_type == "snr":
+        adaptive_weight = get_dynamic_loss_weights(epoch, total_epochs)
         snr = alpha_bar[kt] / (1.0 - alpha_bar[kt])
         snr = torch.clamp(snr, min=0.01, max=10.0).unsqueeze(-1)
         xt_loss = snr * (xt_pred - xt_true) ** 2
@@ -62,19 +65,50 @@ def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, kt, alpha_bar, epo
         epsilon_loss = epsilon_loss.mean()
         xt_loss = xt_loss.mean()
         return (1-adaptive_weight) * epsilon_loss + adaptive_weight * xt_loss
-    elif loss == "mse+l1":
-        adaptive_weight = get_dynamic_loss_weights(epoch, epochs)
+    elif loss_type == "mse+l1":
+        adaptive_weight = get_dynamic_loss_weights(epoch, total_epochs)
         xt_loss_std = torch.std(xt_true) + 1e-8
         epsilon_loss_std = torch.std(epsilon_true) + 1e-8
-        normalized_xt_loss = (F.mse_loss(xt_pred[:, :, 3], xt_true[:, :, 3]) * 0.7 + F.mse_loss(xt_pred, xt_true) * 0.3) / xt_loss_std
+        normalized_xt_loss = (F.mse_loss(xt_pred[:, :, 0], xt_true[:, :, 0]) * 0.7 + F.mse_loss(xt_pred, xt_true) * 0.3) / xt_loss_std
         normalized_epsilon_loss = F.smooth_l1_loss(epsilon_pred, epsilon_true) / epsilon_loss_std
         total_loss = adaptive_weight * normalized_xt_loss + (1 - adaptive_weight) * normalized_epsilon_loss
         return total_loss
-    elif loss =="huber":
+    elif loss_type =="huber":
         huber_loss = F.huber_loss(xt_pred, xt_true, delta=1.0)
         mse_loss = F.mse_loss(xt_pred, xt_true)
         epsilon_loss = F.l1_loss(epsilon_pred, epsilon_true)
         return 0.6 * huber_loss + 0.3 * mse_loss + 0.1 * epsilon_loss
+    elif loss_type == "spike_and_small_masked":
+        adaptive_weight = get_dynamic_loss_weights(epoch, total_epochs)
+
+        xt_loss_std = torch.std(xt_true) + 1e-8
+        epsilon_loss_std = torch.std(epsilon_true) + 1e-8
+
+        normalized_xt_loss = (F.mse_loss(xt_pred[:, :, 0], xt_true[:, :, 0]) * 0.35 +
+                              F.mse_loss(xt_pred[:, :, 1], xt_true[:, :, 1]) * 0.35 +
+                              F.mse_loss(xt_pred, xt_true) * 0.3) / xt_loss_std
+        normalized_epsilon_loss = F.smooth_l1_loss(epsilon_pred, epsilon_true) / epsilon_loss_std
+
+        total_loss = adaptive_weight * normalized_xt_loss + (1 - adaptive_weight) * normalized_epsilon_loss
+
+        spike_mask = (xt_true[:, :, 0] > 0.45).float()
+        spike_penalty = ((xt_pred[:, :, 0] - xt_true[:, :, 0]) ** 2) * spike_mask
+        if spike_mask.sum() > 0:
+            spike_penalty = spike_penalty.sum() / spike_mask.sum()
+        else:
+            spike_penalty = torch.tensor(0.0, device=xt_true.device)
+
+        small_mask = (xt_true[:, :, 0] < 0.035).float()
+        small_penalty = ((xt_pred[:, :, 0] - xt_true[:, :, 0]) ** 2) * small_mask
+        if small_mask.sum() > 0:
+            small_penalty = small_penalty.sum() / small_mask.sum()
+        else:
+            small_penalty = torch.tensor(0.0, device=xt_true.device)
+
+        total_loss += 0.2 * spike_penalty
+        total_loss += 0.2 * small_penalty
+
+        return total_loss
 
 
 def get_scheduled_k(epoch, total_epochs, K, min_k=50, max_k=None):
@@ -100,13 +134,13 @@ def get_scheduled_k(epoch, total_epochs, K, min_k=50, max_k=None):
     k_start = int(min_k + (max_k - min_k) * (0.5 * (1 - np.cos(progress * np.pi))))
     return k_start, max_k
 
-def get_dynamic_loss_weights(epoch, epochs):
+def get_dynamic_loss_weights(epoch, total_epochs):
     """
     Computes a dynamic adaptive weight that controls the balance between
     noise prediction loss (epsilon) and consumption prediction loss (xt) during training.
 
     :param epoch: Current epoch number.
-    :param epochs: Total number of training epochs.
+    :param total_epochs: Total number of training epochs.
     :return: Adaptive weight vallue for current epoch
 
     Description:
@@ -114,7 +148,32 @@ def get_dynamic_loss_weights(epoch, epochs):
         - Later epochs shift focus towards clean signal (xt) prediction.
         - The transition follows a nonlinear schedule to balance learning stages.
     """
-    progress = epoch / epochs
+    progress = epoch / total_epochs
     noise_weight = 0.7 - (0.5 * progress)
     adaptive_weight = (0.7 - 0.3 * progress) * (1 - noise_weight)
     return adaptive_weight
+
+def compute_crps(ground_truth, mean_prediction, std_prediction):
+    """
+    ground_truth: numpy array (shape [N,])
+    mean_prediction: numpy array (shape [N,])
+    std_prediction: numpy array (shape [N,])
+    """
+    crps = crps_gaussian(ground_truth, mean_prediction, std_prediction)
+    return crps.mean()
+
+def save_model(model, save_dir="saved_models", prefix="df_model"):
+    # Creează folder dacă nu există
+    os.makedirs(save_dir, exist_ok=True)
+
+    # Creează timestamp
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Numele complet al fișierului
+    filename = f"{prefix}_{timestamp}.pt"
+    filepath = os.path.join(save_dir, filename)
+
+    # Salvează modelul
+    torch.save(model.state_dict(), filepath)
+
+    print(f"✅ Model saved successfully at: {filepath}")

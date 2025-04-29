@@ -1,0 +1,4 @@
+0.035597
+
+521 hidden dim
+spike loss

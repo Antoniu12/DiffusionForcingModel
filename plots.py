@@ -4,6 +4,7 @@ from datetime import datetime
 import os
 import plotly.graph_objs as go
 import plotly.io as pio
+import torch
 
 from utils.utils import plotting_preprocess_epsilon
 
@@ -22,12 +23,14 @@ class TrainingPlotter:
         os.makedirs(self.save_dir, exist_ok=True)
 
     def update_metrics(self, mse, r2, r2xt, smape):
-        self.mse_loss_list.append(mse)
-        self.r2_score_list.append(r2)
-        self.r2_score_listxt.append(r2xt)
-        self.smape_score_list.append(smape)
+        self.mse_loss_list.append(mse.detach().cpu().item() if torch.is_tensor(mse) else mse)
+        self.r2_score_list.append(r2.detach().cpu().item() if torch.is_tensor(r2) else r2)
+        self.r2_score_listxt.append(r2xt.detach().cpu().item() if torch.is_tensor(r2xt) else r2xt)
+        self.smape_score_list.append(smape.detach().cpu().item() if torch.is_tensor(smape) else smape)
 
     def plot_and_save(self, x, y, label, ylabel, title, filename):
+        x = x.detach().cpu().numpy() if torch.is_tensor(x) else x
+        y = y.detach().cpu().numpy() if torch.is_tensor(y) else y
         plt.figure(figsize=(12, 4))
         plt.plot(x, y, label=label, linewidth=2)
         plt.xlabel("Epochs")
@@ -36,7 +39,7 @@ class TrainingPlotter:
         plt.legend()
         plt.grid(True)
         plt.savefig(os.path.join(self.save_dir, filename))
-        plt.show()
+        plt.show(block=False)
 
     def plot_metrics(self):
         epochs = range(1, len(self.mse_loss_list) + 1)
@@ -47,37 +50,54 @@ class TrainingPlotter:
 
 def plot_test_predictions(test_results, scaler):
     from collections import defaultdict
+    import os
+    import numpy as np
+    import plotly.graph_objs as go
+    import plotly.io as pio
+    from datetime import datetime
+    from utils.utils import plotting_preprocess_epsilon
 
     save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
     os.makedirs(save_dir, exist_ok=True)
 
-    # Store predictions and true values by global timestep
-    pred_dict = defaultdict(list)
-    true_dict = {}
+    pred_dict_consumption = defaultdict(list)
+    true_dict_consumption = {}
 
-    global_timestep = 0  # current global position
+    pred_dict_production = defaultdict(list)
+    true_dict_production = {}
+
+    global_timestep = 0
 
     for idx, (xt_true, xt_pred, epsilon_pred, epsilon_true) in enumerate(test_results):
         seq_len = xt_true.shape[0]
 
         for i in range(seq_len):
             t = global_timestep + i
-            pred_dict[t].append(xt_pred[i, 3])
+            pred_dict_consumption[t].append(xt_pred[i, 0])   # Corrected: 0 is Consumption
+            pred_dict_production[t].append(xt_pred[i, 1])    # Corrected: 1 is Production
 
-            if t not in true_dict:
-                true_dict[t] = xt_true[i, 3]
+            if t not in true_dict_consumption:
+                true_dict_consumption[t] = xt_true[i, 0]
+            if t not in true_dict_production:
+                true_dict_production[t] = xt_true[i, 1]
 
-        global_timestep += 1  # sliding by 1 step
+        global_timestep += 1
 
-    # Sort timesteps
-    timesteps = sorted(true_dict.keys())
+    timesteps = sorted(true_dict_consumption.keys())
 
-    true_flat = [true_dict[t] for t in timesteps]
-    pred_first = [pred_dict[t][0] for t in timesteps]
-    pred_min = [np.min(pred_dict[t]) for t in timesteps]
-    pred_max = [np.max(pred_dict[t]) for t in timesteps]
+    # Prepare Consumption Data
+    true_flat = [true_dict_consumption[t] for t in timesteps]
+    pred_first = [pred_dict_consumption[t][0] for t in timesteps]
+    pred_min = [np.min(pred_dict_consumption[t]) for t in timesteps]
+    pred_max = [np.max(pred_dict_consumption[t]) for t in timesteps]
 
-    # Build Plotly traces
+    # Prepare Production Data
+    true_flat_production = [true_dict_production[t] for t in timesteps]
+    pred_first_production = [pred_dict_production[t][0] for t in timesteps]
+    pred_min_production = [np.min(pred_dict_production[t]) for t in timesteps]
+    pred_max_production = [np.max(pred_dict_production[t]) for t in timesteps]
+
+    # --- Plot Consumption ---
     trace_true = go.Scatter(
         x=timesteps, y=true_flat,
         mode='lines', name='True Consumption',
@@ -101,19 +121,58 @@ def plot_test_predictions(test_results, scaler):
         name='Prediction Interval'
     )
 
-    fig_xt = go.Figure(data=[
+    fig_consumption = go.Figure(data=[
         trace_interval_min,
         trace_interval_max,
         trace_pred,
         trace_true
     ])
-    fig_xt.update_layout(
+    fig_consumption.update_layout(
         title="True vs. Predicted Consumption with Interval",
         xaxis_title="Time Steps",
         yaxis_title="Consumption (Wh)",
         legend=dict(x=0, y=1.1, orientation='h'),
     )
-    pio.write_html(fig_xt, file=os.path.join(save_dir, "xt_consumption_interval_plotly.html"), auto_open=True)
+    pio.write_html(fig_consumption, file=os.path.join(save_dir, "xt_consumption_interval_plotly.html"), auto_open=True)
+
+    # --- Plot Production ---
+    trace_true_p = go.Scatter(
+        x=timesteps, y=true_flat_production,
+        mode='lines', name='True Production',
+        line=dict(color='rgb(0, 191, 255)', width=2)
+    )
+    trace_pred_p = go.Scatter(
+        x=timesteps, y=pred_first_production,
+        mode='lines', name='Predicted Production',
+        line=dict(color='rgb(255, 99, 71)', width=2)
+    )
+    trace_interval_min_p = go.Scatter(
+        x=timesteps, y=pred_min_production,
+        mode='lines', line=dict(color='rgba(255,140,0,0.0)'),
+        showlegend=False
+    )
+    trace_interval_max_p = go.Scatter(
+        x=timesteps, y=pred_max_production,
+        mode='lines', fill='tonexty',
+        fillcolor='rgba(255,140,0,0.3)',
+        line=dict(color='rgba(255,140,0,0.0)'),
+        name='Prediction Interval'
+    )
+
+    fig_production = go.Figure(data=[
+        trace_interval_min_p,
+        trace_interval_max_p,
+        trace_pred_p,
+        trace_true_p
+    ])
+    fig_production.update_layout(
+        title="True vs. Predicted Production with Interval",
+        xaxis_title="Time Steps",
+        yaxis_title="Production (Wh)",
+        legend=dict(x=0, y=1.1, orientation='h'),
+    )
+    pio.write_html(fig_production, file=os.path.join(save_dir, "xt_production_interval_plotly.html"), auto_open=True)
+
 
     # Plot noise
     epsilon_true_all = [e for _, _, _, e in test_results]

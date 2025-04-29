@@ -1,0 +1,7 @@
+0.037721
+
+256 hidden
+60 epoci
+spike and min loss
+
+GRU
