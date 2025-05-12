@@ -6,3 +6,5 @@ am avut rezutate mai rele cu noise embbedding
 am adaugat hubert loss => flatline nu e bun
 
 stepLR produce flatline din cauza sudden change
+
+Transformers bad la preziceri cu embeddings

@@ -1,25 +1,23 @@
 import matplotlib
-import numpy as np
 from datetime import datetime
 import os
-import plotly.graph_objs as go
-import plotly.io as pio
+
+import numpy as np
 import torch
-
-from utils.utils import plotting_preprocess_epsilon
-
 matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 
+
 class TrainingPlotter:
-    def __init__(self):
+    def __init__(self, save_dir=None):
         self.mse_loss_list = []
         self.r2_score_list = []
         self.r2_score_listxt = []
-
         self.smape_score_list = []
-
-        self.save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
+        if save_dir is None:
+            self.save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
+        else:
+            self.save_dir = save_dir
         os.makedirs(self.save_dir, exist_ok=True)
 
     def update_metrics(self, mse, r2, r2xt, smape):
@@ -43,22 +41,22 @@ class TrainingPlotter:
 
     def plot_metrics(self):
         epochs = range(1, len(self.mse_loss_list) + 1)
-        self.plot_and_save(epochs, self.mse_loss_list, "MSE Loss", "MSE Loss", "Training MSE Loss Over Epochs", "mse_loss.png")
-        self.plot_and_save(epochs, self.r2_score_listxt, "R² Score xt ", "R² Score", "Training R² xt Score Over Epochs", "r2_score_xt.png")
-        self.plot_and_save(epochs, self.r2_score_list, "R² Score epsilon", "R² Score", "Training R² epsilin Score Over Epochs", "r2_score.png")
-        self.plot_and_save(epochs, self.smape_score_list, "SMAPE (%)", "SMAPE (%)", "Training SMAPE Over Epochs", "smape.png")
-
-def plot_test_predictions(test_results, scaler):
+        self.plot_and_save(epochs, self.mse_loss_list, "MSE Loss", "MSE Loss", "Training MSE Loss Over Epochs",
+                           "mse_loss.png")
+        self.plot_and_save(epochs, self.r2_score_listxt, "R² Score xt", "R² Score", "Training R² xt Score Over Epochs",
+                           "r2_score_xt.png")
+        self.plot_and_save(epochs, self.r2_score_list, "R² Score epsilon", "R² Score",
+                           "Training R² epsilon Score Over Epochs", "r2_score.png")
+        self.plot_and_save(epochs, self.smape_score_list, "SMAPE (%)", "SMAPE (%)", "Training SMAPE Over Epochs",
+                           "smape.png")
+def plot_test_predictions(test_results, scaler, save_dir):
     from collections import defaultdict
     import os
     import numpy as np
     import plotly.graph_objs as go
     import plotly.io as pio
-    from datetime import datetime
     from utils.utils import plotting_preprocess_epsilon
 
-    save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
-    os.makedirs(save_dir, exist_ok=True)
 
     pred_dict_consumption = defaultdict(list)
     true_dict_consumption = {}
@@ -73,8 +71,8 @@ def plot_test_predictions(test_results, scaler):
 
         for i in range(seq_len):
             t = global_timestep + i
-            pred_dict_consumption[t].append(xt_pred[i, 0])   # Corrected: 0 is Consumption
-            pred_dict_production[t].append(xt_pred[i, 1])    # Corrected: 1 is Production
+            pred_dict_consumption[t].append(xt_pred[i, 0])
+            pred_dict_production[t].append(xt_pred[i, 1])
 
             if t not in true_dict_consumption:
                 true_dict_consumption[t] = xt_true[i, 0]
@@ -85,19 +83,16 @@ def plot_test_predictions(test_results, scaler):
 
     timesteps = sorted(true_dict_consumption.keys())
 
-    # Prepare Consumption Data
     true_flat = [true_dict_consumption[t] for t in timesteps]
     pred_first = [pred_dict_consumption[t][0] for t in timesteps]
     pred_min = [np.min(pred_dict_consumption[t]) for t in timesteps]
     pred_max = [np.max(pred_dict_consumption[t]) for t in timesteps]
 
-    # Prepare Production Data
     true_flat_production = [true_dict_production[t] for t in timesteps]
     pred_first_production = [pred_dict_production[t][0] for t in timesteps]
     pred_min_production = [np.min(pred_dict_production[t]) for t in timesteps]
     pred_max_production = [np.max(pred_dict_production[t]) for t in timesteps]
 
-    # --- Plot Consumption ---
     trace_true = go.Scatter(
         x=timesteps, y=true_flat,
         mode='lines', name='True Consumption',
@@ -191,14 +186,11 @@ def plot_test_predictions(test_results, scaler):
     )
     pio.write_html(fig_eps, file=os.path.join(save_dir, "epsilon_noise_plotly.html"), auto_open=True)
 
-def plot_predictions_with_uncertainty(predictions):
+def plot_predictions_with_uncertainty(predictions, save_dir):
     import plotly.graph_objs as go
     import plotly.io as pio
     import os
-    from datetime import datetime
 
-    save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
-    os.makedirs(save_dir, exist_ok=True)
 
     timesteps = predictions["timesteps"]
     xt_true_all = predictions["xt_true"]
@@ -281,3 +273,39 @@ def plot_predictions_with_uncertainty(predictions):
     )
 
     pio.write_html(fig, file=os.path.join(save_dir, "xt_mc_uncertainty.html"), auto_open=True)
+
+def plot_diffusion_forecast(context, forecast, save_path=None, title="Diffusion Forecast"):
+    """
+    Plots context and forecast as a continuous time series.
+
+    Parameters:
+    - context (np.ndarray): shape (T_context,). The known part of the time series.
+    - forecast (np.ndarray): shape (T_forecast,). The predicted future.
+    - save_path (str): if provided, saves the figure to disk.
+    - title (str): Title of the plot.
+    """
+    if isinstance(context, torch.Tensor):
+        context = context.detach().cpu().numpy()
+    if isinstance(forecast, torch.Tensor):
+        forecast = forecast.detach().cpu().numpy()
+
+    full_series = np.concatenate([context, forecast])
+    t_context = np.arange(len(context))
+    t_forecast = np.arange(len(context), len(context) + len(forecast))
+
+    plt.figure(figsize=(12, 5))
+    plt.plot(t_context, context, label="Context (Ground Truth)", color='blue')
+    plt.plot(t_forecast, forecast, label="Forecast (Diffusion)", color='orange')
+    plt.axvline(x=len(context) - 1, linestyle='--', color='gray', label='Forecast Start')
+    plt.xlabel("Time Steps")
+    plt.ylabel("Value")
+    plt.title(title)
+    plt.legend()
+    plt.tight_layout()
+
+    if save_path:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        plt.savefig(save_path, dpi=300)
+        print(f"Saved plot to {save_path}")
+    else:
+        plt.show()

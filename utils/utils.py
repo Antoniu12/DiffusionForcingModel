@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from properscoring import crps_gaussian
@@ -46,13 +47,20 @@ def get_alphas(betas):
     alphas = 1.0 - betas
     alpha_bars = torch.cumprod(alphas, dim=0)
     return alphas, alpha_bars
-def plotting_preprocess_epsilon(epsilon_true_all, epsilon_pred_all):
-    epsilon_true_avg = [eps.mean(axis=1) for eps in epsilon_true_all]
-    epsilon_pred_avg = [eps.mean(axis=1) for eps in epsilon_pred_all]
 
-    epsilon_true_flat = np.concatenate(epsilon_true_avg)
-    epsilon_pred_flat = np.concatenate(epsilon_pred_avg)
-    return epsilon_true_flat, epsilon_pred_flat
+def compute_sampling_step(xk, epsilon, kt, alpha, alpha_bar, add_noise=True, eta=1.0):
+    alpha_bar_t = alpha_bar.gather(0, kt.view(-1)).view(xk.shape[0], xk.shape[1], 1)
+    alpha_t = alpha.gather(0, kt.view(-1)).view(xk.shape[0], xk.shape[1], 1)
+    sqrt_alpha = torch.sqrt(torch.clamp(alpha_t, min=1e-8))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_bar_t, min=1e-8))
+    beta_t = 1.0 - alpha_t
+    noise = torch.randn_like(xk) if add_noise else 0.0
+    x_prev = (1 / sqrt_alpha) * (xk - ((1 - alpha_t) / sqrt_one_minus_alpha_bar) * epsilon)
+    x_prev += eta * torch.sqrt(beta_t) * noise
+
+
+    return x_prev
+
 
 def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, kt, alpha_bar, epoch, total_epochs, loss_type):
     if loss_type == "snr":
@@ -105,13 +113,17 @@ def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, kt, alpha_bar, epo
         else:
             small_penalty = torch.tensor(0.0, device=xt_true.device)
 
+        eps_std = torch.std(epsilon_pred)
+        eps_penalty = torch.relu(0.01 - eps_std)
+
+        total_loss += 0.1 * eps_penalty
         total_loss += 0.2 * spike_penalty
         total_loss += 0.2 * small_penalty
 
         return total_loss
 
 
-def get_scheduled_k(epoch, total_epochs, K, min_k=50, max_k=None):
+def get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=None):
     """
     Computes the scheduled starting noise level for the diffusion process
     based on the current epoch using a cosine interpolation schedule.
@@ -163,17 +175,22 @@ def compute_crps(ground_truth, mean_prediction, std_prediction):
     return crps.mean()
 
 def save_model(model, save_dir="saved_models", prefix="df_model"):
-    # Creează folder dacă nu există
     os.makedirs(save_dir, exist_ok=True)
-
-    # Creează timestamp
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-
-    # Numele complet al fișierului
     filename = f"{prefix}_{timestamp}.pt"
     filepath = os.path.join(save_dir, filename)
-
-    # Salvează modelul
     torch.save(model.state_dict(), filepath)
+    print(f"Model saved successfully at: {filepath}")
 
-    print(f"✅ Model saved successfully at: {filepath}")
+def extract_target_series(data, scaler, target_column):
+    index = data.index
+    target_values = scaler.inverse_transform(data)[:, scaler.feature_names_in_.tolist().index(target_column)]
+    return pd.Series(target_values, index=index, name=target_column)
+
+def plotting_preprocess_epsilon(epsilon_true_all, epsilon_pred_all):
+    epsilon_true_avg = [eps.mean(axis=1) for eps in epsilon_true_all]
+    epsilon_pred_avg = [eps.mean(axis=1) for eps in epsilon_pred_all]
+
+    epsilon_true_flat = np.concatenate(epsilon_true_avg)
+    epsilon_pred_flat = np.concatenate(epsilon_pred_avg)
+    return epsilon_true_flat, epsilon_pred_flat

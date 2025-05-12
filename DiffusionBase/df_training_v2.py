@@ -18,7 +18,7 @@ def forward_diffuse(xt_true, kt, alpha_bar):
     sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
     return sqrt_alpha_bar * xt_true + sqrt_one_minus_alpha_bar * noise
 
-def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler, loss_type, device):
+def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler, loss_type, device, save_path):
     #optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     optimizer = AdaBelief(
         model.parameters(),
@@ -36,7 +36,7 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
     #scheduler = StepLR(optimizer, step_size=20, gamma=0.5)
     # scheduler = CustomCosineLRScheduler(optimizer, total_epochs=epochs, base_lr=1e-3, min_lr=1e-5)
 
-    plotter = TrainingPlotter()
+    plotter = TrainingPlotter(save_path)
 
     for epoch in range(total_epochs):
         epoch_loss, epoch_r2, epoch_r2xt, epoch_smape = 0, 0, 0, 0
@@ -50,7 +50,7 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
             xt = model.fc_project_2_to_hidden(x0)
             optimizer.zero_grad()
 
-            k_min, k_max = get_scheduled_k(epoch, total_epochs, K, min_k=100, max_k=K - 1)
+            k_min, k_max = get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=K - 1)
             kt = torch.full((xt.shape[0], xt.shape[1]), random.randint(k_min, k_max), device=device)
 
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
@@ -85,7 +85,7 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
             for trajectory in validation_data:
                 x0 = trajectory.unsqueeze(0).to(device)
                 xt = model.fc_project_2_to_hidden(x0)
-                k_min, k_max = get_scheduled_k(epoch, total_epochs, K, min_k=100, max_k=K - 1)
+                k_min, k_max = get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=K - 1)
                 kt = torch.full((xt.shape[0], xt.shape[1]), random.randint(k_min, k_max), device=device)
 
                 xt_noisy = forward_diffuse(xt, kt, alpha_bar)
@@ -108,6 +108,7 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
                 epoch_r2 += r2_eps_val.item()
                 epoch_r2xt += r2_xt_val.item()
                 epoch_smape += smape_eps_val.item() * 0.5 + smape_xt_val * 0.5
+
                 ###
 
         scheduler.step(val_loss / len(validation_data))

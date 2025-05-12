@@ -112,34 +112,21 @@ def plot_feature_correlation_heatmap(dataframe, save_dir="plots", title="Feature
     Returns:
         None
     """
-    # Create plots directory if it doesn't exist
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
-    save_path = os.path.join(save_dir, timestamp)
-    os.makedirs(save_path, exist_ok=True)
-
-    # Compute correlation matrix
+    os.makedirs(save_dir, exist_ok=True)
     corr_matrix = dataframe.corr()
-
-    # Set up the matplotlib figure (BIG size)
-    plt.figure(figsize=(22, 18))  # ✅ Much bigger figure
-
+    plt.figure(figsize=(22, 18))
     sns.heatmap(
         corr_matrix,
         cmap="coolwarm",
-        annot=True,           # ✅ Write the numbers
-        fmt=".2f",             # ✅ 2 decimals
+        annot=True,
+        fmt=".2f",
         linewidths=0.5,
-        annot_kws={"size": 9}  # ✅ Bigger font size for numbers
+        annot_kws={"size": 9}
     )
-
     plt.title(title, fontsize=20)
-    plt.xticks(rotation=45, ha='right', fontsize=10)   # ✅ Rotate and align x-labels
-    plt.yticks(rotation=0, fontsize=10)                # ✅ Y labels stay horizontal
+    plt.xticks(rotation=45, ha='right', fontsize=10)
+    plt.yticks(rotation=0, fontsize=10)
     plt.tight_layout()
-
-    # Save and show
-    save_file = os.path.join(save_path, "feature_correlation_heatmap.png")
+    save_file = os.path.join(save_dir, "feature_correlation_heatmap.png")
     plt.savefig(save_file, dpi=300)
     plt.show(block=False)
-
-

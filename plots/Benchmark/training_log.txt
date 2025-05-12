@@ -1,0 +1,14 @@
+Training Log - 2025-05-04 16:41:30
+
+Model: DFBackbone
+Model Configuration:
+  input_dim: 42
+  hidden_dim: 512
+  K: 1000
+  epochs: 60
+  loss_type: spike_and_small_masked
+
+
+
+Final Evaluation Metrics:
+CRPS Score: 0.032424

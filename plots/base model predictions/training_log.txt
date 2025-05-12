@@ -1,0 +1,11 @@
+Training Log - 2025-04-30 10:59:50
+
+Model: DFBackbone
+Model Configuration:
+  input_dim: 42
+  hidden_dim: 512
+  K: 1000
+  epochs: 70
+  loss_type: spike_and_small_masked
+
+

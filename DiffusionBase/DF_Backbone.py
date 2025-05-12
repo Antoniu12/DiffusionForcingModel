@@ -28,13 +28,13 @@ class DFBackbone(nn.Module):
         )
         self.fc_project_hidden_to_feature = nn.Linear(hidden_dim, input_dim)
 
-    def forward(self, z_t_prev, xt_noisy, k, alpha_bar):
+    def forward(self, zt_prev, xt_noisy, k, alpha_bar):
         kt = k.float().unsqueeze(-1)
         normalized_kt = kt / 1000.0
-        kt_to_feature = normalized_kt.repeat(1, 1, xt_noisy.size(-1))
+        kt_to_feature = normalized_kt.expand_as(xt_noisy)
 
         input_xt = torch.cat([xt_noisy, kt_to_feature], dim=-1)
-        input_epsilon_pred = torch.cat([z_t_prev, input_xt], dim=-1)
+        input_epsilon_pred = torch.cat([zt_prev, input_xt], dim=-1)
 
         epsilon_pred, _ = self.RNN(input_epsilon_pred)
         zt_updated, _ = self.zt_transition(epsilon_pred)
