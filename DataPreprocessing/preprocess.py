@@ -1,16 +1,13 @@
-import os
-from datetime import datetime
-
-import holidays
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import torch
-from matplotlib import pyplot as plt
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import MinMaxScaler
 from statsmodels.tsa.seasonal import seasonal_decompose
 from holidays.countries.ireland import Ireland
+import seaborn as sns
+import matplotlib.pyplot as plt
+import os
 
 def load_and_preprocess_data(file_path, granularity="D"):
     data = pd.read_csv(file_path)
@@ -78,10 +75,8 @@ def load_and_preprocess_data(file_path, granularity="D"):
     return data_normalized, scaler
 
 def create_tensors(data, test_size=0.1, val_size=0.2):
-
     aux_data, test_data = train_test_split(data, test_size=test_size, shuffle=False)
     train_data, val_data = train_test_split(aux_data, test_size=val_size, shuffle=False)
-
     train_tensor = torch.tensor(train_data.values, dtype=torch.float32)
     val_tensor = torch.tensor(val_data.values, dtype=torch.float32)
     test_tensor = torch.tensor(test_data.values, dtype=torch.float32)
@@ -90,15 +85,11 @@ def create_tensors(data, test_size=0.1, val_size=0.2):
 
 def create_sequences(data_tensor, seq_length):
     sequences = []
-    for i in range(len(data_tensor) - seq_length):
+    for i in range(len(data_tensor) - seq_length + 1):
         seq = data_tensor[i:i+seq_length]
         sequences.append(seq)
     return sequences
 
-import seaborn as sns
-import matplotlib.pyplot as plt
-import os
-from datetime import datetime
 
 def plot_feature_correlation_heatmap(dataframe, save_dir="plots", title="Feature Correlation Heatmap"):
     """
@@ -129,4 +120,4 @@ def plot_feature_correlation_heatmap(dataframe, save_dir="plots", title="Feature
     plt.tight_layout()
     save_file = os.path.join(save_dir, "feature_correlation_heatmap.png")
     plt.savefig(save_file, dpi=300)
-    plt.show(block=False)
+    # plt.show(block=False)

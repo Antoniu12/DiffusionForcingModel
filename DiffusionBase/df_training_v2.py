@@ -3,22 +3,31 @@ import random
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from adabelief_pytorch import AdaBelief
+from plotly import plot
 from torchmetrics import R2Score
 from torchmetrics.regression import SymmetricMeanAbsolutePercentageError
 
 from plots import TrainingPlotter
-from utils.utils import custom_loss, get_scheduled_k
+from utils.utils import custom_loss, get_scheduled_k, compute_sampling_step
 
 
 def forward_diffuse(xt_true, kt, alpha_bar):
     noise = torch.randn_like(xt_true)
     alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_true.shape[0], xt_true.shape[1], 1)
-    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-8))
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-3))
     sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
     return sqrt_alpha_bar * xt_true + sqrt_one_minus_alpha_bar * noise
 
-def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler, loss_type, device, save_path):
+def compute_epsilon_true(xt_noisy, x_true, kt, alpha_bar):
+    alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_noisy.shape[0], xt_noisy.shape[1], 1)
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-8))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
+    epsilon_true = (xt_noisy - sqrt_alpha_bar * x_true) / sqrt_one_minus_alpha_bar
+    return epsilon_true
+
+def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler, loss_type, device, save_path, one_shot_training=False):
     #optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     optimizer = AdaBelief(
         model.parameters(),
@@ -30,7 +39,10 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
         weight_decouple=True,
         print_change_log=False
     )
-
+    # for p in model.fc_project_xt_output.parameters():
+    #     p.requires_grad = True
+    # for p in model.fc_project_2_to_hidden.parameters():
+    #     p.requires_grad = True
     #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', patience=2, factor=0.3, threshold=0.001)
     #scheduler = StepLR(optimizer, step_size=20, gamma=0.5)
@@ -47,6 +59,7 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
 
         for trajectory in data:
             x0 = trajectory.unsqueeze(0).to(device)
+
             xt = model.fc_project_2_to_hidden(x0)
             optimizer.zero_grad()
 
@@ -55,18 +68,40 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
 
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
-            epsilon_true = (xt_noisy - torch.sqrt(alpha_bar[kt].view(1, -1, 1)) * xt) / torch.sqrt(1 - alpha_bar[kt].view(1, -1, 1))
+            epsilon_true = compute_epsilon_true(xt_noisy, xt, kt, alpha_bar)
 
             xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
             zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
-            # zt_prev = zt_updated.detach()
+            # print(f"epsilon true std: {epsilon_true.std().item()}, epsilon pred std: {epsilon_pred.std().item()}")
 
-            xt_true = x0
-            xt_pred = model.fc_project_xt_output(xt_pred)
-            total_loss = custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, kt, alpha_bar, epoch, total_epochs, loss_type)
+            xt_pred_output = model.fc_project_xt_output(xt_pred)
+            x0_encoded = model.fc_project_2_to_hidden(x0)
+            x0_decoded = model.fc_project_xt_output(x0_encoded)
+            # xt_pred_decoded = model.fc_project_xt_output(xt_pred)
+            # print(f"true x0: {x0[:, :, 0]}\n, decoded x0: {x0_decoded[:, :, 0]}\n, x0 from epsilon_pred: {xt_pred_output[:, :, 0]}\n")
+
+            # if epoch == 2:
+            #     print(f"xt: {xt.detach().cpu().numpy()[0]}\nxt_pred: {xt_pred.detach().cpu().numpy()[0]}")
+
+            if epoch == 100:
+                print("xt_true mean/std:", xt.mean().item(), xt.std().item())
+                print("xt_pred mean/std:", xt_pred.mean().item(), xt_pred.std().item())
+                corr = torch.nn.functional.cosine_similarity(
+                    xt.flatten(1),
+                    xt_pred.flatten(1),
+                    dim=1
+                )
+                print("Latent cosine similarity:", corr.mean().item())
+                epsilon_error = (epsilon_pred - epsilon_true).abs().mean().item()
+                print("ε prediction error:", epsilon_error)
+                print("Mean ᾱ[k]:", alpha_bar[kt].mean().item())
+
+            total_loss = custom_loss(epsilon_pred, epsilon_true,
+                                     xt_pred_output, x0, xt_pred, xt,
+                                     kt, alpha_bar, epoch, total_epochs, loss_type)
 
             total_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) #nan daca o scot
             optimizer.step()
             epoch_loss += total_loss.item()
 
@@ -85,31 +120,30 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
             for trajectory in validation_data:
                 x0 = trajectory.unsqueeze(0).to(device)
                 xt = model.fc_project_2_to_hidden(x0)
+
                 k_min, k_max = get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=K - 1)
                 kt = torch.full((xt.shape[0], xt.shape[1]), random.randint(k_min, k_max), device=device)
 
                 xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
-                epsilon_true = (xt_noisy - torch.sqrt(alpha_bar[kt].view(1, -1, 1)) * xt) / torch.sqrt(1 - alpha_bar[kt].view(1, -1, 1))
+                epsilon_true = compute_epsilon_true(xt_noisy, xt, kt, alpha_bar)
 
                 xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
                 zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
-                #zt_prev = zt_updated.detach()
 ###################MODEL EVAL###################
 
-                xt_out = model.fc_project_xt_output(xt_pred)
-                val_loss += custom_loss(epsilon_pred, epsilon_true, xt_out, x0, kt, alpha_bar, epoch, total_epochs, loss_type)
+                xt_pred_output = model.fc_project_xt_output(xt_pred)
+                val_loss += custom_loss(epsilon_pred, epsilon_true, xt_pred_output, x0, xt_pred, xt,
+                                        kt, alpha_bar, epoch, total_epochs, loss_type)
 
                 r2_eps_val = r2_eps(epsilon_pred.reshape(-1), epsilon_true.reshape(-1))
-                r2_xt_val = r2_xt(xt_out.reshape(-1), x0.reshape(-1))
+                r2_xt_val = r2_xt(xt_pred_output.reshape(-1), x0.reshape(-1))
                 smape_eps_val = smape_eps(epsilon_pred.reshape(-1), epsilon_true.reshape(-1))
-                smape_xt_val = smape_xt(xt_out.reshape(-1), x0.reshape(-1))
+                smape_xt_val = smape_xt(xt_pred_output.reshape(-1), x0.reshape(-1))
 
                 epoch_r2 += r2_eps_val.item()
                 epoch_r2xt += r2_xt_val.item()
                 epoch_smape += smape_eps_val.item() * 0.5 + smape_xt_val * 0.5
-
-                ###
 
         scheduler.step(val_loss / len(validation_data))
 
@@ -117,7 +151,7 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
                                epoch_r2 / len(validation_data),
                                epoch_r2xt / len(validation_data),
                                epoch_smape / len(validation_data))
-
+        # if epoch > 5:
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.4f}, Validation Loss: {val_loss / len(validation_data):.4f}")
         for param_group in optimizer.param_groups:
             print(f"Epoch {epoch + 1}, LR: {param_group['lr']}")
@@ -135,14 +169,16 @@ def predict(model, test_data, alpha, alpha_bar, K, scaler, device):
         for trajectory in test_data:
             x0 = trajectory.unsqueeze(0).to(device)
             xt = model.fc_project_2_to_hidden(x0)
-            kt = torch.full((xt.shape[0], xt.shape[1]), random.randrange(0, K)).to(device)
+
+            kt = torch.full((xt.shape[0], xt.shape[1]), K-1, device=device)
 
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
-            epsilon_true = (xt_noisy - torch.sqrt(alpha_bar[kt].view(1, -1, 1)) * xt) / torch.sqrt(1 - alpha_bar[kt].view(1, -1, 1))
+            epsilon_true = compute_epsilon_true(xt_noisy, xt, kt, alpha_bar)
 
             xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
             zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
+            xt_pred = xt_pred / xt_pred.std() * xt.std()
 
             xt_pred_full = model.fc_project_xt_output(xt_pred)
 
@@ -150,8 +186,8 @@ def predict(model, test_data, alpha, alpha_bar, K, scaler, device):
             xt_true_full = x0.squeeze(0).cpu().numpy()
             predictions.append((xt_true_full,
                                 xt_pred_full,
-                                epsilon_pred.squeeze().cpu().numpy(),
-                                epsilon_true.squeeze().cpu().numpy()))
+                                epsilon_pred.squeeze(0).cpu().numpy(),
+                                epsilon_true.squeeze(0).cpu().numpy()))
 
     return predictions
 def predict_with_uncertainty(model, test_data, alpha, alpha_bar, K, scaler, device, T=30):
@@ -176,7 +212,7 @@ def predict_with_uncertainty(model, test_data, alpha, alpha_bar, K, scaler, devi
         for i, trajectory in enumerate(test_data):
             x0 = trajectory.unsqueeze(0).to(device)
             xt = model.fc_project_2_to_hidden(x0)
-            kt = torch.full((xt.shape[0], xt.shape[1]), random.randrange(0, K), device=device)
+            kt = torch.full((xt.shape[0], xt.shape[1]), K-1, device=device)
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
             for _ in range(T):
@@ -214,7 +250,6 @@ def predict_with_uncertainty(model, test_data, alpha, alpha_bar, K, scaler, devi
         "xt_pred_mean": xt_pred_mean,
         "xt_pred_std": xt_pred_std
     }
-
 def enable_dropout(model):
     for m in model.modules():
         if isinstance(m, nn.Dropout):

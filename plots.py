@@ -174,14 +174,16 @@ def plot_test_predictions(test_results, scaler, save_dir):
     epsilon_pred_all = [e for _, _, e, _ in test_results]
     epsilon_true_flat, epsilon_pred_flat = plotting_preprocess_epsilon(epsilon_true_all, epsilon_pred_all)
 
-    trace_eps_true = go.Scatter(y=epsilon_true_flat, mode='lines', name='True Noise (Avg)', line=dict(color='green'))
-    trace_eps_pred = go.Scatter(y=epsilon_pred_flat, mode='lines', name='Predicted Noise (Avg)', line=dict(color='orange'))
+    trace_eps_true = go.Scatter(y=epsilon_true_flat, mode='lines', name='True Noise (Feature 0)',
+                                line=dict(color='green'))
+    trace_eps_pred = go.Scatter(y=epsilon_pred_flat, mode='lines', name='Predicted Noise (Feature 0)',
+                                line=dict(color='orange'))
 
     fig_eps = go.Figure(data=[trace_eps_true, trace_eps_pred])
     fig_eps.update_layout(
-        title="Averaged Noise over All Features",
+        title="Noise Prediction for Feature 0 (Consumption or Production)",
         xaxis_title="Time Steps",
-        yaxis_title="Avg Noise",
+        yaxis_title="Noise Value",
         legend=dict(x=0, y=1.1, orientation='h'),
     )
     pio.write_html(fig_eps, file=os.path.join(save_dir, "epsilon_noise_plotly.html"), auto_open=True)
@@ -274,31 +276,49 @@ def plot_predictions_with_uncertainty(predictions, save_dir):
 
     pio.write_html(fig, file=os.path.join(save_dir, "xt_mc_uncertainty.html"), auto_open=True)
 
-def plot_diffusion_forecast(context, forecast, save_path=None, title="Diffusion Forecast"):
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+
+def plot_diffusion_forecast(context, forecast, ground_truth=None, column="Consumption",
+                            save_path=None, title="Diffusion Forecast", plot_length=24):
     """
-    Plots context and forecast as a continuous time series.
+    Plots the last `plot_length` steps of context, forecast, and optionally ground truth.
 
     Parameters:
-    - context (np.ndarray): shape (T_context,). The known part of the time series.
-    - forecast (np.ndarray): shape (T_forecast,). The predicted future.
+    - context (Tensor or ndarray): shape (T_context,). The known past.
+    - forecast (Tensor or ndarray): shape (T_forecast,). The predicted future.
+    - ground_truth (Tensor or ndarray, optional): shape (T_forecast,). The actual future.
+    - column (str): "Consumption" or "Production" (ignored here, kept for compatibility).
     - save_path (str): if provided, saves the figure to disk.
     - title (str): Title of the plot.
+    - plot_length (int): Number of recent time steps to plot.
     """
-    if isinstance(context, torch.Tensor):
-        context = context.detach().cpu().numpy()
-    if isinstance(forecast, torch.Tensor):
-        forecast = forecast.detach().cpu().numpy()
 
-    full_series = np.concatenate([context, forecast])
+    def to_numpy(x):
+        if isinstance(x, torch.Tensor):
+            return x.detach().cpu().numpy()
+        return x
+
+    context = to_numpy(context)[-plot_length:]
+    forecast = to_numpy(forecast)[-plot_length:]
+    if ground_truth is not None:
+        ground_truth = to_numpy(ground_truth)[-plot_length:]
+
     t_context = np.arange(len(context))
     t_forecast = np.arange(len(context), len(context) + len(forecast))
 
     plt.figure(figsize=(12, 5))
-    plt.plot(t_context, context, label="Context (Ground Truth)", color='blue')
+    plt.plot(t_context, context, label="Context (Last)", color='blue')
     plt.plot(t_forecast, forecast, label="Forecast (Diffusion)", color='orange')
+
+    if ground_truth is not None:
+        plt.plot(t_forecast, ground_truth, label="True Future", color='green', linestyle='--')
+
     plt.axvline(x=len(context) - 1, linestyle='--', color='gray', label='Forecast Start')
     plt.xlabel("Time Steps")
-    plt.ylabel("Value")
+    plt.ylabel(column)
     plt.title(title)
     plt.legend()
     plt.tight_layout()
@@ -309,3 +329,31 @@ def plot_diffusion_forecast(context, forecast, save_path=None, title="Diffusion 
         print(f"Saved plot to {save_path}")
     else:
         plt.show()
+
+
+def plot_flattened_consumption(true_tensor, pred_tensor, feature_index=0, max_points=500):
+    """
+    Plot true vs predicted values from flattened overlapping windows.
+    """
+    if isinstance(true_tensor, torch.Tensor):
+        true_tensor = true_tensor.detach().cpu()
+    if isinstance(pred_tensor, torch.Tensor):
+        pred_tensor = pred_tensor.detach().cpu()
+
+    true_vals = true_tensor[:, feature_index].numpy()
+    pred_vals = pred_tensor[:, feature_index].numpy()
+
+    if len(true_vals) > max_points:
+        true_vals = true_vals[:max_points]
+        pred_vals = pred_vals[:max_points]
+
+    plt.figure(figsize=(12, 6))
+    plt.plot(true_vals, label="True Consumption", linewidth=2)
+    plt.plot(pred_vals, label="Predicted Consumption", linestyle="--")
+    plt.title("One-Step Diffusion Forecast vs True Consumption")
+    plt.xlabel("Time Step")
+    plt.ylabel("Normalized Consumption")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()

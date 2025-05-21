@@ -8,3 +8,5 @@ am adaugat hubert loss => flatline nu e bun
 stepLR produce flatline din cauza sudden change
 
 Transformers bad la preziceri cu embeddings
+
+preantrezen layerele featuredim hidden dim si invers deoarece modelul invata sa le prezica pe alea nu noise-ul

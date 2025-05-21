@@ -1,53 +1,51 @@
 import torch
+
+from DiffusionBase.DF_Backbone import predict_start_from_noise
 from DiffusionBase.df_training_v2 import forward_diffuse
-from utils.utils import compute_sampling_step
+from utils.utils import compute_sampling_step, flatten_overlapping_windows_batched_last
 
-
-def sample_from_diffusion_with_context(model, context_seq, steps_ahead, hidden_dim,
-                                       alpha, alpha_bar, K, stride=1, num_steps=2):
-    model.eval()
-    device = next(model.parameters()).device
-    context_seq = context_seq.clone().detach().to(device)
+def sample_whole_test(model, test_data, alpha_bar,sequence_dim, feature_dim, hidden_dim, K, device, one_shot_denoising=True):
     predictions = []
+    zt_prev = torch.zeros(
+        (1, model.fc_project_seq_to_hidden.in_features, model.fc_project_seq_to_hidden.out_features),
+        device=device
+    )
+    flag = True
+    for test_seq in test_data:
+        # xt_noisy = torch.randn((1, sequence_dim, feature_dim), device=device)
+        # xt_noisy = model.fc_project_2_to_hidden(xt_noisy)
 
-    # Step 1: Encode context into zt_prev using k=0 (no noise)
-    zt_prev = torch.zeros((1,
-                           model.fc_project_seq_to_hidden.in_features,
-                           model.fc_project_seq_to_hidden.out_features),
-                          device=device)
+        x0 = test_seq.unsqueeze(0).to(device)
+        xt_noisy = model.fc_project_2_to_hidden(x0)
 
-    for trajectory in context_seq:
-        x0 = trajectory.unsqueeze(0).to(device)
-        x0 = model.fc_project_2_to_hidden(x0)
-        k0 = torch.zeros((1, x0.shape[1]), dtype=torch.long, device=device)
-        _, _, zt_updated = model(zt_prev, x0, k0, alpha_bar)
+        kt = torch.full((xt_noisy.shape[0], xt_noisy.shape[1]), K-1).to(device)
+        xt_noisy = forward_diffuse(xt_noisy, kt, alpha_bar)
+        # x0 = test_seq.unsqueeze(0).to(device)
+        # x0 = model.fc_project_2_to_hidden(x0)
+        # kt = torch.full((x0.shape[0], x0.shape[1]), K-1, dtype=torch.long, device=device)
+        # xt_noisy = forward_diffuse(x0, kt, alpha_bar)
+        #
+        # x0_pred = predict_start_from_noise(xt_noisy, kt, noise, alpha_bar)
+        if one_shot_denoising:
+            x0_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
+            print(f"eps std = {epsilon_pred.std().item():.4f}")
+        else:
+            for step in reversed(range(1, K-1, 1)):
+                # if flag:
+                    # print(f"step: {step}, xt_noisy: {xt_noisy}, xtnoisy.shape: {xt_noisy.shape}")
+                kt = torch.full((xt_noisy.shape[0], xt_noisy.shape[1]), step, dtype=torch.long, device=device)
+                _, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
+                # epsilon_pred = epsilon_pred.clamp(-0.15, 0.15)
+                x0_est = predict_start_from_noise(xt_noisy, kt, epsilon_pred, alpha_bar)
+                kt = torch.full((xt_noisy.shape[0], xt_noisy.shape[1]), step-1, dtype=torch.long, device=device)
+                xt_noisy = forward_diffuse(x0_est, kt, alpha_bar)
+                if flag:
+                    print(f"Step {step}: eps std = {epsilon_pred.std().item():.4f}")
+                    # print(f"step: {step}, xt-1: {xt_noisy}, xtnoisy.shape: {xt_noisy.shape}")
+            kt = torch.full((xt_noisy.shape[0], xt_noisy.shape[1]), 0, dtype=torch.long, device=device)
+            x0_pred = predict_start_from_noise(xt_noisy, kt, epsilon_pred, alpha_bar)
         zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
-
-    # Step 2: Initialize xt with Gaussian noise
-    xt = torch.randn(1, steps_ahead, hidden_dim, device=device)
-
-    # Step 3: Define denoising schedule (e.g. 100 uniform steps from K-1 to 0)
-    timesteps = torch.linspace(K - 1, 0, steps=num_steps, dtype=torch.long)
-
-    for i in range(len(timesteps) - 1):
-        k = timesteps[i].item()
-        k_next = timesteps[i + 1].item()
-        kt = torch.full((xt.shape[0], xt.shape[1]), int(k), device=device, dtype=torch.long)
-
-        # Step 4: Model predicts ε (noise)
-        _, epsilon_pred, zt_updated = model(zt_prev, xt, kt, alpha_bar)
-        epsilon_pred = epsilon_pred.clamp(-2.0, 2.0)
-
-        # Step 5: Update xt ← xt-1 using your DDPM-based compute_sampling_step
-        xt = compute_sampling_step(xt, epsilon_pred, kt, alpha, alpha_bar, add_noise=(k_next > 0), eta=0.0)
-
-        # Step 6: Update latent
-        zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
-
-    # Step 7: Final projection to observable space
-    xt = model.fc_project_xt_output(xt).clamp(0, 1)
-
-    predictions.append(xt)
-
-    forecast = torch.cat(predictions, dim=1).squeeze(0).detach().cpu().numpy()
-    return forecast
+        xt_pred = model.fc_project_xt_output(x0_pred)
+        predictions.append(xt_pred.squeeze(0))
+        flag = False
+    return predictions
