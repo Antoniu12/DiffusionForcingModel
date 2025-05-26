@@ -8,8 +8,6 @@ import torch
 import torch.nn.functional as F
 from properscoring import crps_gaussian
 
-from DiffusionBase.DF_Backbone import predict_start_from_noise
-
 
 def cosine_beta_schedule(timesteps, s=0.008):
     """
@@ -32,7 +30,7 @@ def cosine_beta_schedule(timesteps, s=0.008):
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     betas = torch.clip(betas, min=1e-8, max=0.999)
-    return betas
+    return betas.double()
 def get_alphas(betas):
     """
     Computes alphas and cumulative product of alphas from beta schedule.
@@ -49,7 +47,7 @@ def get_alphas(betas):
 
     alphas = 1.0 - betas
     alpha_bars = torch.cumprod(alphas, dim=0)
-    return alphas, alpha_bars
+    return alphas.double(), alpha_bars.double()
 
 # def compute_sampling_step(xk, epsilon, kt, alpha, alpha_bar, add_noise=True, eta=1.0):
 #     alpha_bar_t = alpha_bar.gather(0, kt.view(-1)).view(xk.shape[0], xk.shape[1], 1)
@@ -109,11 +107,11 @@ def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, xt_pred_hidden, xt
         xt_loss_std = torch.std(xt_true[:, :, :2]) + 1e-8
         xt_loss = (F.mse_loss(xt_pred[:, :, 0], xt_true[:, :, 0]) * 0.5 +
                    F.mse_loss(xt_pred[:, :, 1], xt_true[:, :, 1]) * 0.5)
-        xt_loss /= torch.clamp(torch.std(xt_true[:, :, :2]), min=0.1)
+        # xt_loss /= torch.clamp(torch.std(xt_true[:, :, :2]), min=0.1)
 
-        latent_align_loss = F.mse_loss(xt_pred_hidden, xt_true_hidden)
+        # latent_align_loss = F.mse_loss(xt_pred_hidden, xt_true_hidden)
         std_loss = F.mse_loss(xt_pred_hidden.std(dim=(0, 1)), xt_true_hidden.std(dim=(0, 1)))
-        xt_loss += 0.2 * latent_align_loss
+        # xt_loss += 0.2 * latent_align_loss
         xt_loss += 0.2 * std_loss
 
         spike_mask = (xt_true[:, :, 0] > 0.45).float()
@@ -133,11 +131,11 @@ def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, xt_pred_hidden, xt
         xt_loss += 0.2 * spike_penalty
         xt_loss += 0.2 * small_penalty
 
-        latent_loss = F.mse_loss(xt_pred, xt_true)
         cos_sim = F.cosine_similarity(xt_pred.flatten(1), xt_true.flatten(1), dim=1).mean()
         cosine_loss = 1 - cos_sim
         std_loss = F.mse_loss(xt_pred.std(dim=(0, 1)), xt_true.std(dim=(0, 1)))
-
+        # xt_loss += 0.2 * cosine_loss
+        # xt_loss += 0.2 * std_loss
         ##############################################################################epsilon
         epsilon_loss_std = torch.std(epsilon_true) + 1e-8
 
@@ -148,12 +146,14 @@ def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, xt_pred_hidden, xt
         # epsilon_f1 = F.smooth_l1_loss(epsilon_pred, epsilon_true)
         # spec_loss = fft_loss(epsilon_pred, epsilon_true)
         epsilon_loss = 0.5 * F.mse_loss(epsilon_pred, epsilon_true) + 0.5 * fft_loss(epsilon_pred, epsilon_true)
-        normalized_epsilon_loss = epsilon_loss #/ epsilon_loss_std
+        normalized_epsilon_loss = epsilon_loss / epsilon_loss_std
         std_penalty = ((epsilon_pred.std() - 1.0) ** 2)
         normalized_epsilon_loss = normalized_epsilon_loss + 0.05 * std_penalty
-
-        # total_loss = (1 - adaptive_weight) * xt_loss + adaptive_weight * normalized_epsilon_loss
-        total_loss = normalized_epsilon_loss
+        # print(f"xt_loss: {xt_loss}, normalized_epsilon_loss: {normalized_epsilon_loss}")
+        total_loss = (1 - adaptive_weight) * xt_loss + adaptive_weight * normalized_epsilon_loss
+        # total_loss = normalized_epsilon_loss
+        # if epoch > 50:
+        #     total_loss = total_loss * 0.8 + F.mse_loss(xt_pred_hidden, xt_true_hidden) * 0.2
         # total_loss = (
         #         0.6 * epsilon_loss +  # if you're still using ε supervision
         #         0.2 * latent_loss +  # structure alignment
@@ -161,7 +161,6 @@ def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, xt_pred_hidden, xt
         #         0.1 * std_loss  # scale
         # )
         return total_loss
-
 
 def fft_loss(pred, target):
     pred_fft = torch.fft.rfft(pred, dim=1)
@@ -193,7 +192,7 @@ def get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=None):
     k_start = int(min_k + (max_k - min_k) * (0.5 * (1 - np.cos(progress * np.pi))))
     # return k_start, max_k
     return K-1, K-1
-def get_dynamic_loss_weights(epoch, total_epochs, start=0.8, end=0.2):
+def get_dynamic_loss_weights(epoch, total_epochs, start=0.4, end=0.2):
     """
     Computes a dynamic adaptive weight that controls the balance between
     noise prediction loss (epsilon) and consumption prediction loss (xt) during training.

@@ -9,7 +9,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 
-def load_and_preprocess_data(file_path, granularity="D"):
+def load_and_preprocess_data(file_path, granularity="1h"):
     data = pd.read_csv(file_path)
     data = data[['date', ' Consumption(Wh)', ' Production(Wh)']]
     data['date'] = pd.to_datetime(data['date'])
@@ -77,9 +77,9 @@ def load_and_preprocess_data(file_path, granularity="D"):
 def create_tensors(data, test_size=0.1, val_size=0.2):
     aux_data, test_data = train_test_split(data, test_size=test_size, shuffle=False)
     train_data, val_data = train_test_split(aux_data, test_size=val_size, shuffle=False)
-    train_tensor = torch.tensor(train_data.values, dtype=torch.float32)
-    val_tensor = torch.tensor(val_data.values, dtype=torch.float32)
-    test_tensor = torch.tensor(test_data.values, dtype=torch.float32)
+    train_tensor = torch.tensor(train_data.values, dtype=torch.float64)
+    val_tensor = torch.tensor(val_data.values, dtype=torch.float64)
+    test_tensor = torch.tensor(test_data.values, dtype=torch.float64)
     return train_tensor, val_tensor, test_tensor
 
 
@@ -121,3 +121,37 @@ def plot_feature_correlation_heatmap(dataframe, save_dir="plots", title="Feature
     save_file = os.path.join(save_dir, "feature_correlation_heatmap.png")
     plt.savefig(save_file, dpi=300)
     # plt.show(block=False)
+
+def preprocess_aep_dataset(file_path, test_size=0.1, val_size=0.2):
+    df = pd.read_csv(file_path, parse_dates=['Datetime'])
+    df.set_index('Datetime', inplace=True)
+    df = df.groupby('Datetime').mean()
+    df = df.asfreq('h')
+
+    # Feature engineering
+    df['hour'] = df.index.hour
+    df['day'] = df.index.day
+    df['weekday'] = df.index.weekday
+    df['month'] = df.index.month
+
+    target_col = 'AEP_MW'
+    feature_cols = ['AEP_MW', 'hour', 'day', 'weekday', 'month']
+
+    scaler = MinMaxScaler()
+    df[feature_cols] = scaler.fit_transform(df[feature_cols])
+    df = df.dropna()
+
+    train_df, test_df = train_test_split(df, test_size=test_size, shuffle=False)
+    train_df, val_df = train_test_split(train_df, test_size=val_size, shuffle=False)
+
+    train_tensor = torch.tensor(train_df.values, dtype=torch.float32)
+    val_tensor = torch.tensor(val_df.values, dtype=torch.float32)
+    test_tensor = torch.tensor(test_df.values, dtype=torch.float32)
+
+    test_start_index = df.index[-len(test_tensor)]
+    test_end_index = df.index[-1]
+
+    print(f"Test set starts at: {test_start_index}")
+    print(f"Test set ends at: {test_end_index}")
+
+    return train_tensor, val_tensor, test_tensor, scaler

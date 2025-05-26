@@ -10,10 +10,10 @@ from models.GRU import GRUWithLayerNorm
 
 def predict_start_from_noise(xt_noisy, kt, noise, alpha_bar):
     alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_noisy.shape[0], xt_noisy.shape[1], 1)
-    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-3))
-    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-3))
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-4))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-4))
     x0 = (xt_noisy - sqrt_one_minus_alpha_bar * noise) / sqrt_alpha_bar
-    # x_pred = x0.clamp(-1, 1)
+
     return x0
 
 class DFBackbone(nn.Module):
@@ -29,11 +29,24 @@ class DFBackbone(nn.Module):
         # )
         # self.RNN = nn.LSTM(3 * hidden_dim, hidden_dim, num_layers=2, batch_first=True, dropout=0.2)
         self.epsilon_head = nn.Linear(hidden_dim, hidden_dim)
-        self.RNN = GRUWithLayerNorm(3 * hidden_dim, hidden_dim)
+        # self.xt_prediction = nn.GRU(2 * hidden_dim, hidden_dim, batch_first=True)
+        self.xt_prediction = nn.Sequential(
+            nn.Linear(2 * hidden_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        # self.xt_head = nn.Linear(hidden_dim, hidden_dim)
+        self.xt_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim * 2),
+            nn.GELU(),
+            nn.Linear(hidden_dim * 2, hidden_dim)
+        )
+        self.RNN = GRUWithLayerNorm(2 * hidden_dim, hidden_dim)
         self.zt_transition = nn.GRU(hidden_dim, hidden_dim, batch_first=True)
         self.fc_project_seq_to_hidden = nn.Linear(seq_dim, hidden_dim)
         self.fc_project_xt_output = nn.Linear(hidden_dim, input_dim)
         self.fc_project_hidden_to_feature = nn.Linear(hidden_dim, input_dim)
+        self.noise_scale = nn.Parameter(torch.tensor(0.1))
 
 
     @staticmethod
@@ -53,18 +66,21 @@ class DFBackbone(nn.Module):
         embed = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
         return embed
     def forward(self, zt_prev, xt_noisy, kt, alpha_bar):
-        # kt = k.float().unsqueeze(-1)
-        # normalized_kt = kt / 1000.0
-        # kt_to_feature = normalized_kt.expand_as(xt_noisy)
-        # k_embed = self.k_embedding(normalized_kt.unsqueeze(-1).float())
         k_embed = self.sinusoidal_embedding(kt, dim=512)
 
         input_xt = torch.cat([xt_noisy, k_embed], dim=-1)
-        input_epsilon_pred = torch.cat([zt_prev, input_xt], dim=-1)
+        # input_epsilon_pred = torch.cat([zt_prev, input_xt], dim=-1)
+        input_epsilon_pred = input_xt
         rnn_out, _ = self.RNN(input_epsilon_pred)
         epsilon_pred = self.epsilon_head(xt_noisy + rnn_out)
-        zt_updated, _ = self.zt_transition(epsilon_pred)
-        xt_pred = predict_start_from_noise(xt_noisy.detach(), kt, epsilon_pred, alpha_bar)
+        input_xt_prediction = torch.cat([xt_noisy, zt_prev], dim=-1)
+        output_xt_prediction = self.xt_prediction(input_xt_prediction)
+
+        xt_pred = self.xt_head(output_xt_prediction + rnn_out)
+        # xt_pred = residual + self.noise_scale * epsilon_pred
+        # xt_pred = predict_start_from_noise(xt_noisy, kt, epsilon_pred, alpha_bar)
+        zt_updated, _ = self.zt_transition(xt_pred)
+
         return xt_pred, epsilon_pred, zt_updated
 
 def pretrain_layers(model, data, total_epochs, device):

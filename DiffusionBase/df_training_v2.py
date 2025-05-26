@@ -16,21 +16,21 @@ from utils.utils import custom_loss, get_scheduled_k, compute_sampling_step
 def forward_diffuse(xt_true, kt, alpha_bar):
     noise = torch.randn_like(xt_true)
     alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_true.shape[0], xt_true.shape[1], 1)
-    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-3))
-    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-4))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-4))
     return sqrt_alpha_bar * xt_true + sqrt_one_minus_alpha_bar * noise
 
 def compute_epsilon_true(xt_noisy, x_true, kt, alpha_bar):
     alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_noisy.shape[0], xt_noisy.shape[1], 1)
-    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-8))
-    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-4))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-4))
     epsilon_true = (xt_noisy - sqrt_alpha_bar * x_true) / sqrt_one_minus_alpha_bar
     return epsilon_true
 
 def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler, loss_type, device, save_path, one_shot_training=False):
     #optimizer = optim.AdamW(model.parameters(), lr=1e-3)
     optimizer = AdaBelief(
-        model.parameters(),
+        filter(lambda p: p.requires_grad, model.parameters()),
         lr=5e-4,
         eps=1e-16,
         betas=(0.9, 0.999),
@@ -94,7 +94,6 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
                 print("Latent cosine similarity:", corr.mean().item())
                 epsilon_error = (epsilon_pred - epsilon_true).abs().mean().item()
                 print("ε prediction error:", epsilon_error)
-                print("Mean ᾱ[k]:", alpha_bar[kt].mean().item())
 
             total_loss = custom_loss(epsilon_pred, epsilon_true,
                                      xt_pred_output, x0, xt_pred, xt,
@@ -102,6 +101,8 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
 
             total_loss.backward()
             # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0) #nan daca o scot
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             optimizer.step()
             epoch_loss += total_loss.item()
 
@@ -152,7 +153,7 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
                                epoch_r2xt / len(validation_data),
                                epoch_smape / len(validation_data))
         # if epoch > 5:
-        print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.4f}, Validation Loss: {val_loss / len(validation_data):.4f}")
+        print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.8f}, Validation Loss: {val_loss / len(validation_data):.8f}")
         for param_group in optimizer.param_groups:
             print(f"Epoch {epoch + 1}, LR: {param_group['lr']}")
 
@@ -188,7 +189,6 @@ def predict(model, test_data, alpha, alpha_bar, K, scaler, device):
                                 xt_pred_full,
                                 epsilon_pred.squeeze(0).cpu().numpy(),
                                 epsilon_true.squeeze(0).cpu().numpy()))
-
     return predictions
 def predict_with_uncertainty(model, test_data, alpha, alpha_bar, K, scaler, device, T=30):
     import numpy as np
