@@ -26,7 +26,6 @@ def train_model(model, train_loader, val_loader, num_epochs=100, patience=10, de
             optimizer.step()
             train_loss += loss.item()
 
-        # Validation
         model.eval()
         val_loss = 0.0
         with torch.no_grad():

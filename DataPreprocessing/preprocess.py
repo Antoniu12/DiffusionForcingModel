@@ -71,15 +71,19 @@ def load_and_preprocess_data(file_path, granularity="1h"):
         columns=features_to_normalize,
         index=data.index
     )
-
     return data_normalized, scaler
 
 def create_tensors(data, test_size=0.1, val_size=0.2):
     aux_data, test_data = train_test_split(data, test_size=test_size, shuffle=False)
     train_data, val_data = train_test_split(aux_data, test_size=val_size, shuffle=False)
-    train_tensor = torch.tensor(train_data.values, dtype=torch.float64)
-    val_tensor = torch.tensor(val_data.values, dtype=torch.float64)
-    test_tensor = torch.tensor(test_data.values, dtype=torch.float64)
+    train_tensor = torch.tensor(train_data.values, dtype=torch.float32)
+    val_tensor = torch.tensor(val_data.values, dtype=torch.float32)
+    test_tensor = torch.tensor(test_data.values, dtype=torch.float32)
+    test_start_index = data.index[-len(test_tensor)]
+    test_end_index = data.index[-1]
+
+    print(f"Test set starts at: {test_start_index}")
+    print(f"Test set ends at: {test_end_index}")
     return train_tensor, val_tensor, test_tensor
 
 

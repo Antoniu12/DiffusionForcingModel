@@ -30,7 +30,7 @@ def cosine_beta_schedule(timesteps, s=0.008):
     alphas_cumprod = alphas_cumprod / alphas_cumprod[0]
     betas = 1 - (alphas_cumprod[1:] / alphas_cumprod[:-1])
     betas = torch.clip(betas, min=1e-8, max=0.999)
-    return betas.double()
+    return betas
 def get_alphas(betas):
     """
     Computes alphas and cumulative product of alphas from beta schedule.
@@ -47,7 +47,7 @@ def get_alphas(betas):
 
     alphas = 1.0 - betas
     alpha_bars = torch.cumprod(alphas, dim=0)
-    return alphas.double(), alpha_bars.double()
+    return alphas, alpha_bars
 
 # def compute_sampling_step(xk, epsilon, kt, alpha, alpha_bar, add_noise=True, eta=1.0):
 #     alpha_bar_t = alpha_bar.gather(0, kt.view(-1)).view(xk.shape[0], xk.shape[1], 1)
@@ -104,38 +104,37 @@ def custom_loss(epsilon_pred, epsilon_true, xt_pred, xt_true, xt_pred_hidden, xt
     elif loss_type == "spike_and_small_masked":
         adaptive_weight = get_dynamic_loss_weights(epoch, total_epochs)
 ##############################################################################XT
-        xt_loss_std = torch.std(xt_true[:, :, :2]) + 1e-8
-        xt_loss = (F.mse_loss(xt_pred[:, :, 0], xt_true[:, :, 0]) * 0.5 +
-                   F.mse_loss(xt_pred[:, :, 1], xt_true[:, :, 1]) * 0.5)
-        # xt_loss /= torch.clamp(torch.std(xt_true[:, :, :2]), min=0.1)
+        spike_mask_cons = (xt_true[:, :, 0] > 0.45).float()
+        spike_penalty_cons = ((xt_pred[:, :, 0] - xt_true[:, :, 0]) ** 2) * spike_mask_cons
+        spike_penalty_cons = spike_penalty_cons.sum() / spike_mask_cons.sum() if spike_mask_cons.sum() > 0 else torch.tensor(
+            0.0, device=xt_true.device)
 
-        # latent_align_loss = F.mse_loss(xt_pred_hidden, xt_true_hidden)
-        std_loss = F.mse_loss(xt_pred_hidden.std(dim=(0, 1)), xt_true_hidden.std(dim=(0, 1)))
-        # xt_loss += 0.2 * latent_align_loss
-        xt_loss += 0.2 * std_loss
+        small_mask_cons = (xt_true[:, :, 0] < 0.035).float()
+        small_penalty_cons = ((xt_pred[:, :, 0] - xt_true[:, :, 0]) ** 2) * small_mask_cons
+        small_penalty_cons = small_penalty_cons.sum() / small_mask_cons.sum() if small_mask_cons.sum() > 0 else torch.tensor(
+            0.0, device=xt_true.device)
 
-        spike_mask = (xt_true[:, :, 0] > 0.45).float()
-        spike_penalty = ((xt_pred[:, :, 0] - xt_true[:, :, 0]) ** 2) * spike_mask
-        if spike_mask.sum() > 0:
-            spike_penalty = spike_penalty.sum() / spike_mask.sum()
-        else:
-            spike_penalty = torch.tensor(0.0, device=xt_true.device)
+        spike_mask_prod = (xt_true[:, :, 1] > 0.45).float()
+        spike_penalty_prod = ((xt_pred[:, :, 1] - xt_true[:, :, 1]) ** 2) * spike_mask_prod
+        spike_penalty_prod = spike_penalty_prod.sum() / spike_mask_prod.sum() if spike_mask_prod.sum() > 0 else torch.tensor(
+            0.0, device=xt_true.device)
 
-        small_mask = (xt_true[:, :, 0] < 0.035).float()
-        small_penalty = ((xt_pred[:, :, 0] - xt_true[:, :, 0]) ** 2) * small_mask
-        if small_mask.sum() > 0:
-            small_penalty = small_penalty.sum() / small_mask.sum()
-        else:
-            small_penalty = torch.tensor(0.0, device=xt_true.device)
+        small_mask_prod = (xt_true[:, :, 1] < 0.035).float()
+        small_penalty_prod = ((xt_pred[:, :, 1] - xt_true[:, :, 1]) ** 2) * small_mask_prod
+        small_penalty_prod = small_penalty_prod.sum() / small_mask_prod.sum() if small_mask_prod.sum() > 0 else torch.tensor(
+            0.0, device=xt_true.device)
 
-        xt_loss += 0.2 * spike_penalty
-        xt_loss += 0.2 * small_penalty
-
-        cos_sim = F.cosine_similarity(xt_pred.flatten(1), xt_true.flatten(1), dim=1).mean()
-        cosine_loss = 1 - cos_sim
         std_loss = F.mse_loss(xt_pred.std(dim=(0, 1)), xt_true.std(dim=(0, 1)))
-        # xt_loss += 0.2 * cosine_loss
-        # xt_loss += 0.2 * std_loss
+        cosine_loss = 1 - F.cosine_similarity(xt_pred.flatten(1), xt_true.flatten(1), dim=1).mean()
+
+        xt_loss = (
+                F.mse_loss(xt_pred, xt_true) * 0.5 +
+                (spike_penalty_cons + spike_penalty_prod) * 0.05 +  # shared weight
+                (small_penalty_cons + small_penalty_prod) * 0.05 +
+                cosine_loss * 0.1 +
+                std_loss * 0.1 +
+                fft_loss(epsilon_pred, epsilon_true) * 0.1
+        )
         ##############################################################################epsilon
         epsilon_loss_std = torch.std(epsilon_true) + 1e-8
 
@@ -188,29 +187,12 @@ def get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=None):
         - Early epochs use small k (less noise), later epochs use large k (more noise).
     """
     max_k = max_k if max_k is not None else K - 1
-    progress = min(epoch / (total_epochs - 20), 1.0)
+    progress = min(epoch / (total_epochs - 4), 1.0)
     k_start = int(min_k + (max_k - min_k) * (0.5 * (1 - np.cos(progress * np.pi))))
     # return k_start, max_k
-    return K-1, K-1
+    return k_start, max_k
 def get_dynamic_loss_weights(epoch, total_epochs, start=0.4, end=0.2):
-    """
-    Computes a dynamic adaptive weight that controls the balance between
-    noise prediction loss (epsilon) and consumption prediction loss (xt) during training.
-
-    :param epoch: Current epoch number.
-    :param total_epochs: Total number of training epochs.
-    :return: Adaptive weight vallue for current epoch
-
-    Description:
-        - Early epochs focus more on noise (epsilon) prediction.
-        - Later epochs shift focus towards clean signal (xt) prediction.
-        - The transition follows a nonlinear schedule to balance learning stages.
-    """
     progress = min(epoch / total_epochs, 1.0)
-    # noise_weight = 0.7 - (0.5 * progress)
-    # adaptive_weight = (0.7 - 0.3 * progress) * (1 - noise_weight)
-    # return adaptive_weight #0.5
-    # adaptive_weight = min(0.6, 0.6 * progress)
     return start + (end - start) * progress
 
 def compute_crps(ground_truth, mean_prediction, std_prediction):

@@ -16,8 +16,8 @@ from utils.utils import custom_loss, get_scheduled_k, compute_sampling_step
 def forward_diffuse(xt_true, kt, alpha_bar):
     noise = torch.randn_like(xt_true)
     alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_true.shape[0], xt_true.shape[1], 1)
-    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-4))
-    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-4))
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-9))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-9))
     return sqrt_alpha_bar * xt_true + sqrt_one_minus_alpha_bar * noise
 
 def compute_epsilon_true(xt_noisy, x_true, kt, alpha_bar):
@@ -74,29 +74,17 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
             zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
             # print(f"epsilon true std: {epsilon_true.std().item()}, epsilon pred std: {epsilon_pred.std().item()}")
 
-            xt_pred_output = model.fc_project_xt_output(xt_pred)
-            x0_encoded = model.fc_project_2_to_hidden(x0)
-            x0_decoded = model.fc_project_xt_output(x0_encoded)
+            # xt_pred_output = model.fc_project_xt_output(xt_pred)
+
             # xt_pred_decoded = model.fc_project_xt_output(xt_pred)
             # print(f"true x0: {x0[:, :, 0]}\n, decoded x0: {x0_decoded[:, :, 0]}\n, x0 from epsilon_pred: {xt_pred_output[:, :, 0]}\n")
 
             # if epoch == 2:
             #     print(f"xt: {xt.detach().cpu().numpy()[0]}\nxt_pred: {xt_pred.detach().cpu().numpy()[0]}")
 
-            if epoch == 100:
-                print("xt_true mean/std:", xt.mean().item(), xt.std().item())
-                print("xt_pred mean/std:", xt_pred.mean().item(), xt_pred.std().item())
-                corr = torch.nn.functional.cosine_similarity(
-                    xt.flatten(1),
-                    xt_pred.flatten(1),
-                    dim=1
-                )
-                print("Latent cosine similarity:", corr.mean().item())
-                epsilon_error = (epsilon_pred - epsilon_true).abs().mean().item()
-                print("ε prediction error:", epsilon_error)
 
             total_loss = custom_loss(epsilon_pred, epsilon_true,
-                                     xt_pred_output, x0, xt_pred, xt,
+                                     xt_pred, x0, xt_pred, xt,
                                      kt, alpha_bar, epoch, total_epochs, loss_type)
 
             total_loss.backward()
@@ -133,14 +121,13 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
                 zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
 ###################MODEL EVAL###################
 
-                xt_pred_output = model.fc_project_xt_output(xt_pred)
-                val_loss += custom_loss(epsilon_pred, epsilon_true, xt_pred_output, x0, xt_pred, xt,
+                val_loss += custom_loss(epsilon_pred, epsilon_true, xt_pred, x0, xt_pred, xt,
                                         kt, alpha_bar, epoch, total_epochs, loss_type)
 
                 r2_eps_val = r2_eps(epsilon_pred.reshape(-1), epsilon_true.reshape(-1))
-                r2_xt_val = r2_xt(xt_pred_output.reshape(-1), x0.reshape(-1))
+                r2_xt_val = r2_xt(xt_pred.reshape(-1), x0.reshape(-1))
                 smape_eps_val = smape_eps(epsilon_pred.reshape(-1), epsilon_true.reshape(-1))
-                smape_xt_val = smape_xt(xt_pred_output.reshape(-1), x0.reshape(-1))
+                smape_xt_val = smape_xt(xt_pred.reshape(-1), x0.reshape(-1))
 
                 epoch_r2 += r2_eps_val.item()
                 epoch_r2xt += r2_xt_val.item()
@@ -152,7 +139,6 @@ def df_training(model, data, validation_data, alpha_bar, K, total_epochs, scaler
                                epoch_r2 / len(validation_data),
                                epoch_r2xt / len(validation_data),
                                epoch_smape / len(validation_data))
-        # if epoch > 5:
         print(f"Epoch {epoch + 1}, Loss: {epoch_loss/len(data):.8f}, Validation Loss: {val_loss / len(validation_data):.8f}")
         for param_group in optimizer.param_groups:
             print(f"Epoch {epoch + 1}, LR: {param_group['lr']}")
@@ -171,7 +157,7 @@ def predict(model, test_data, alpha, alpha_bar, K, scaler, device):
             x0 = trajectory.unsqueeze(0).to(device)
             xt = model.fc_project_2_to_hidden(x0)
 
-            kt = torch.full((xt.shape[0], xt.shape[1]), K-1, device=device)
+            kt = torch.full((xt.shape[0], xt.shape[1]), random.randint(5, K-1), device=device)
 
             xt_noisy = forward_diffuse(xt, kt, alpha_bar)
 
@@ -179,14 +165,13 @@ def predict(model, test_data, alpha, alpha_bar, K, scaler, device):
 
             xt_pred, epsilon_pred, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
             zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
-            xt_pred = xt_pred / xt_pred.std() * xt.std()
 
-            xt_pred_full = model.fc_project_xt_output(xt_pred)
+            # xt_pred_full = model.fc_project_xt_output(xt_pred)
 
-            xt_pred_full = xt_pred_full.squeeze(0).cpu().numpy()
+            xt_pred = xt_pred.squeeze(0).cpu().numpy()
             xt_true_full = x0.squeeze(0).cpu().numpy()
             predictions.append((xt_true_full,
-                                xt_pred_full,
+                                xt_pred,
                                 epsilon_pred.squeeze(0).cpu().numpy(),
                                 epsilon_true.squeeze(0).cpu().numpy()))
     return predictions
@@ -217,8 +202,8 @@ def predict_with_uncertainty(model, test_data, alpha, alpha_bar, K, scaler, devi
 
             for _ in range(T):
                 xt_pred, _, zt_updated = model(zt_prev, xt_noisy, kt, alpha_bar)
-                xt_out = model.fc_project_xt_output(xt_pred)
-                xt_out_np = xt_out.squeeze(0).cpu().numpy()[:, 0]
+                # xt_out = model.fc_project_xt_output(xt_pred)
+                xt_out_np = xt_pred.squeeze(0).cpu().numpy()[:, 0]
 
                 if i < len(test_data) - 1:
                     predictions_by_timestep[global_timestep].append(xt_out_np[0])

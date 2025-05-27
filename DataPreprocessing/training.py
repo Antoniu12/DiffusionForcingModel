@@ -13,7 +13,7 @@ from DiffusionBase.diffusion_forcing_sampling import sample_whole_test
 from models.Lstm import LSTMRegressor
 from models.TrainModel import train_model
 from models.Transformer import TransformerRegressor
-from models.forecast import forecast_day_from_model
+from models.forecast import forecast_day_from_model_aep, forecast_day_from_model_h
 from models.generate_predictions import predict_next_24h
 from utils.Sequence_Dataset import SequenceDataset
 
@@ -54,8 +54,8 @@ print(f"Number of validation sequences: {len(validation_sequences)}")
 print(f"Number of test sequences: {len(test_sequences)}")
 input_dim = data_normalised.shape[1]
 hidden_dim = 512
-K = 1000
-epochs = 120
+K = 100
+epochs = 60
 betas = utils.cosine_beta_schedule(K)
 alpha, alpha_bar = utils.get_alphas(betas)
 
@@ -69,10 +69,10 @@ model_config = {
 }
 # logger.log_model_config(model_name="DFBackbone", config_dict=model_config)
 # # device = 'cpu'
-# alpha = alpha.to(device)
-# alpha_bar = alpha_bar.to(device)
+alpha = alpha.to(device)
+alpha_bar = alpha_bar.to(device)
 #
-# forecast_window = 24
+forecast_window = 24
 # stride = 1
 
 
@@ -120,83 +120,83 @@ model_config = {
 
 #TRAIN MODEL
 ##############################################################################################################################
-# model = DFBackbone(input_dim=input_dim, hidden_dim=hidden_dim, seq_dim=seq_length)
-# model = model.double()
-# model = model.to(device)
-# # pretrain_layers(model, train_sequences, total_epochs=60, device=device)
-# df_training(model, train_sequences, validation_sequences, alpha_bar, K, epochs,
-#             scaler, loss_type, device=device, save_path=save_path, one_shot_training=False)
-# save_model(model, save_path, )
+model = DFBackbone(input_dim=input_dim, hidden_dim=hidden_dim, seq_dim=seq_length)
+model = model.to(device)
+pretrain_layers(model, train_sequences, total_epochs=20, device=device)
+df_training(model, train_sequences, validation_sequences, alpha_bar, K, epochs,
+            scaler, loss_type, device=device, save_path=save_path, one_shot_training=False)
+save_model(model, save_path, )
+
+test_results = predict(model, test_sequences, alpha, alpha_bar, K, scaler, device=device)
+plot_test_predictions(test_results, scaler, save_path)
+# alpha_bar = alpha_bar.flip(0).contiguous()
+
+test_results2 = predict_with_uncertainty(model, test_sequences, alpha, alpha_bar, K, scaler, device=device)
+
+crps_score = compute_crps(
+    np.array(test_results2["xt_true"]),
+    np.array(test_results2["xt_pred_mean"]),
+    np.array(test_results2["xt_pred_std"])
+)
+
+print(f"CRPS Score: {crps_score:.6f}")
+
+logger.save_final_metrics(crps_score)
 #
+plot_predictions_with_uncertainty(test_results2, save_path)
+
+
+
+# model = DFBackbone(input_dim=input_dim, hidden_dim=hidden_dim, seq_dim=seq_length)
+# model.load_state_dict(torch.load("plots/2025-05-20_16-54/df_model_2025-05-20_16-58-23.pt"))
+# model.to(device)
+# torch.cuda.empty_cache()
 # test_results = predict(model, test_sequences, alpha, alpha_bar, K, scaler, device=device)
 # plot_test_predictions(test_results, scaler, save_path)
-# # alpha_bar = alpha_bar.flip(0).contiguous()
-#
-# test_results2 = predict_with_uncertainty(model, test_sequences, alpha, alpha_bar, K, scaler, device=device)
-#
-# crps_score = compute_crps(
-#     np.array(test_results2["xt_true"]),
-#     np.array(test_results2["xt_pred_mean"]),
-#     np.array(test_results2["xt_pred_std"])
+# forecast = sample_from_diffusion_with_context(
+#     model, context_seq, seq_length, forecast_window, hidden_dim, alpha, alpha_bar, K
 # )
-#
-# print(f"CRPS Score: {crps_score:.6f}")
-#
-# logger.save_final_metrics(crps_score)
-# #
+
+test_sequences = create_sequences(test_tensor[-forecast_window:], seq_length)
+predictions = sample_whole_test(model, test_sequences, alpha_bar, seq_length, input_dim, hidden_dim, K, device=device)
+# test_results2 = predict_with_uncertainty(model, test_sequences, alpha, alpha_bar, K, scaler, device=device)
 # plot_predictions_with_uncertainty(test_results2, save_path)
-#
-#
-#
-# # model = DFBackbone(input_dim=input_dim, hidden_dim=hidden_dim, seq_dim=seq_length)
-# # model.load_state_dict(torch.load("plots/2025-05-20_16-54/df_model_2025-05-20_16-58-23.pt"))
-# # model.to(device)
-# # torch.cuda.empty_cache()
-# # test_results = predict(model, test_sequences, alpha, alpha_bar, K, scaler, device=device)
-# # plot_test_predictions(test_results, scaler, save_path)
-# # forecast = sample_from_diffusion_with_context(
-# #     model, context_seq, seq_length, forecast_window, hidden_dim, alpha, alpha_bar, K
-# # )
-# test_sequences = create_sequences(test_tensor[-forecast_window:], seq_length)
-# predictions = sample_whole_test(model, test_sequences, alpha_bar, seq_length, input_dim, hidden_dim, K, device=device)
-# # test_results2 = predict_with_uncertainty(model, test_sequences, alpha, alpha_bar, K, scaler, device=device)
-# # plot_predictions_with_uncertainty(test_results2, save_path)
-#
-# true = flatten_overlapping_windows(test_sequences)
-# forecast = flatten_overlapping_windows(predictions)
-#
-# forecast = get_from_sequence(forecast.detach(), column="Consumption").cpu().numpy()
-# true_future = get_from_sequence(true, column="Consumption").cpu().numpy()
-#
-# # Plot
-# plt.figure(figsize=(10, 5))
-# plt.plot(true_future, label="True Consumption")
-# plt.plot(forecast, label="Forecasted Consumption")
-# plt.title("One-Step Forecast vs True Consumption")
-# plt.xlabel("Time step")
-# plt.ylabel("Normalized Consumption")
-# plt.legend()
-# plt.grid(True)
-# plt.tight_layout()
-# plt.show()
+
+true = flatten_overlapping_windows(test_sequences)
+forecast = flatten_overlapping_windows(predictions)
+
+forecast = get_from_sequence(forecast.detach(), column="Consumption").cpu().numpy()
+true_future = get_from_sequence(true, column="Consumption").cpu().numpy()
+
+# Plot
+plt.figure(figsize=(10, 5))
+plt.plot(true_future, label="True Consumption")
+plt.plot(forecast, label="Forecasted Consumption")
+plt.title("One-Step Forecast vs True Consumption")
+plt.xlabel("Time step")
+plt.ylabel("Normalized Consumption")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 ##############################################################################################################################
 
 #LSTM MODEL AND TRANSFORMER TRAINING
 ##############################################################################################################################
-file_path = './training sets'
-
-trained_models_root = os.path.join(".", "trained_models")
-
-lstm_model_dir = os.path.join(trained_models_root, "lstm", "model")
-lstm_scaler_dir = os.path.join(trained_models_root, "lstm", "scaler")
-transformer_model_dir = os.path.join(trained_models_root, "transformer", "model")
-transformer_scaler_dir = os.path.join(trained_models_root, "transformer", "scaler")
-
-os.makedirs(lstm_model_dir, exist_ok=True)
-os.makedirs(lstm_scaler_dir, exist_ok=True)
-os.makedirs(transformer_model_dir, exist_ok=True)
-os.makedirs(transformer_scaler_dir, exist_ok=True)
+# file_path = './training sets'
 #
+# trained_models_root = os.path.join(".", "trained_models")
+#
+# lstm_model_dir = os.path.join(trained_models_root, "lstm", "model")
+# lstm_scaler_dir = os.path.join(trained_models_root, "lstm", "scaler")
+# transformer_model_dir = os.path.join(trained_models_root, "transformer", "model")
+# transformer_scaler_dir = os.path.join(trained_models_root, "transformer", "scaler")
+#
+# os.makedirs(lstm_model_dir, exist_ok=True)
+# os.makedirs(lstm_scaler_dir, exist_ok=True)
+# os.makedirs(transformer_model_dir, exist_ok=True)
+# os.makedirs(transformer_scaler_dir, exist_ok=True)
+# #
 # for i in range(1, 21):
 #     file_name = f"H{i}_Wh.csv"
 #     data_location = os.path.join(file_path, file_name)
@@ -211,17 +211,13 @@ os.makedirs(transformer_scaler_dir, exist_ok=True)
 #
 #     input_dim = data_normalised.shape[1]
 #
-#     train_sequences = create_sequences(train_tensor, seq_length)
-#     test_sequences = create_sequences(test_tensor, seq_length)
-#     validation_sequences = create_sequences(validation_tensor, seq_length)
-#
 #     train_loader = DataLoader(SequenceDataset(train_tensor, seq_length), batch_size=32, shuffle=True)
 #     val_loader = DataLoader(SequenceDataset(validation_tensor, seq_length), batch_size=32, shuffle=False)
 #     test_loader = DataLoader(SequenceDataset(test_tensor, seq_length), batch_size=32, shuffle=False)
 #
 #     lstm_model = LSTMRegressor(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=input_dim).to(device)
 #
-#     transformer_model = TransformerRegressor(input_dim=input_dim,hidden_dim=hidden_dim, output_dim=input_dim).to(device)
+#     transformer_model = TransformerRegressor(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=input_dim).to(device)
 #
 #     train_model(lstm_model, train_loader, val_loader, num_epochs=epochs, device=device)
 #
@@ -235,11 +231,11 @@ os.makedirs(transformer_scaler_dir, exist_ok=True)
 #     with open(os.path.join(transformer_scaler_dir, f"H{i}.pkl"), "wb") as f:
 #         pickle.dump(scaler, f)
 
-train_tensor, val_tensor, test_tensor, scaler = preprocess_aep_dataset("./training sets/AEP_hourly.csv")
-input_dim = train_tensor.shape[1]
-train_loader = DataLoader(SequenceDataset(train_tensor, seq_length), batch_size=32, shuffle=True)
-val_loader = DataLoader(SequenceDataset(val_tensor, seq_length), batch_size=32, shuffle=False)
-test_loader = DataLoader(SequenceDataset(test_tensor, seq_length), batch_size=32, shuffle=False)
+# train_tensor, val_tensor, test_tensor, scaler = preprocess_aep_dataset("./training sets/AEP_Wh.csv")
+# input_dim = train_tensor.shape[1]
+# train_loader = DataLoader(SequenceDataset(train_tensor, seq_length), batch_size=32, shuffle=True)
+# val_loader = DataLoader(SequenceDataset(val_tensor, seq_length), batch_size=32, shuffle=False)
+# test_loader = DataLoader(SequenceDataset(test_tensor, seq_length), batch_size=32, shuffle=False)
 #
 # lstm_model = LSTMRegressor(input_dim, hidden_dim, input_dim)
 # lstm_model.to(device)
@@ -248,22 +244,29 @@ test_loader = DataLoader(SequenceDataset(test_tensor, seq_length), batch_size=32
 # with open(os.path.join(lstm_scaler_dir, f"AEP.pkl"), "wb") as f:
 #     pickle.dump(scaler, f)
 #
-transformer_model = TransformerRegressor(input_dim, hidden_dim, input_dim)
-transformer_model.to(device)
-train_model(transformer_model, train_loader, val_loader, num_epochs=epochs, device=device)
-torch.save(transformer_model.state_dict(), os.path.join(transformer_model_dir, f"AEP.pth"))
-with open(os.path.join(transformer_scaler_dir, f"AEP.pkl"), "wb") as f:
-    pickle.dump(scaler, f)
+# transformer_model = TransformerRegressor(input_dim, hidden_dim, input_dim)
+# transformer_model.to(device)
+# train_model(transformer_model, train_loader, val_loader, num_epochs=epochs, device=device)
+# torch.save(transformer_model.state_dict(), os.path.join(transformer_model_dir, f"AEP.pth"))
+# with open(os.path.join(transformer_scaler_dir, f"AEP.pkl"), "wb") as f:
+#     pickle.dump(scaler, f)
 ##############################################################################################################################
 
-model = TransformerRegressor(input_dim=5, hidden_dim=512, output_dim=5)
-forecast_day_from_model(
-    model=model,
-    target_date=datetime(2018, 6, 21),
-    csv_path="./training sets/AEP_hourly.csv",
-    model_path="./trained_models/transformer/model/AEP.pth",
-    scaler_path="./trained_models/transformer/scaler/AEP.pkl"
-)
-
+# model = LSTMRegressor(input_dim=42, hidden_dim=512, output_dim=42)
+# # forecast_day_from_model_aep(
+# #     model=model,
+# #     target_date=datetime(2018, 6, 21),
+# #     csv_path="./training sets/AEP_Wh.csv",
+# #     model_path="./trained_models/transformer/model/AEP.pth",
+# #     scaler_path="./trained_models/transformer/scaler/AEP.pkl"
+# # )
+# forecast_day_from_model_h(
+#     model=model,
+#     target_date=datetime(2020, 12, 21),
+#     csv_path="./training sets/H1_Wh.csv",
+#     model_path="./trained_models/lstm/model/H1.pth",
+#     scaler_path="./trained_models/lstm/scaler/H1.pkl"
+# )
+#
 
 

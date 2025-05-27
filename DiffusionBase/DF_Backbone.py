@@ -10,8 +10,8 @@ from models.GRU import GRUWithLayerNorm
 
 def predict_start_from_noise(xt_noisy, kt, noise, alpha_bar):
     alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_noisy.shape[0], xt_noisy.shape[1], 1)
-    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-4))
-    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-4))
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-9))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-9))
     x0 = (xt_noisy - sqrt_one_minus_alpha_bar * noise) / sqrt_alpha_bar
 
     return x0
@@ -31,7 +31,7 @@ class DFBackbone(nn.Module):
         self.epsilon_head = nn.Linear(hidden_dim, hidden_dim)
         # self.xt_prediction = nn.GRU(2 * hidden_dim, hidden_dim, batch_first=True)
         self.xt_prediction = nn.Sequential(
-            nn.Linear(2 * hidden_dim, hidden_dim),
+            nn.Linear(4 * hidden_dim, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim)
         )
@@ -50,7 +50,7 @@ class DFBackbone(nn.Module):
 
 
     @staticmethod
-    def sinusoidal_embedding(kt, dim=32, max_k=999):
+    def sinusoidal_embedding(kt, dim=32, max_k=99):
         """
         kt: Tensor of shape [B, T]
         dim: Embedding dimension (must be even)
@@ -66,22 +66,26 @@ class DFBackbone(nn.Module):
         embed = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
         return embed
     def forward(self, zt_prev, xt_noisy, kt, alpha_bar):
+        k_threshold = 70
+        inversion_mask = (kt < k_threshold).float().unsqueeze(-1)
         k_embed = self.sinusoidal_embedding(kt, dim=512)
 
-        input_xt = torch.cat([xt_noisy, k_embed], dim=-1)
-        # input_epsilon_pred = torch.cat([zt_prev, input_xt], dim=-1)
-        input_epsilon_pred = input_xt
+        input_epsilon_pred = torch.cat([xt_noisy, k_embed], dim=-1)
         rnn_out, _ = self.RNN(input_epsilon_pred)
         epsilon_pred = self.epsilon_head(xt_noisy + rnn_out)
-        input_xt_prediction = torch.cat([xt_noisy, zt_prev], dim=-1)
-        output_xt_prediction = self.xt_prediction(input_xt_prediction)
 
-        xt_pred = self.xt_head(output_xt_prediction + rnn_out)
-        # xt_pred = residual + self.noise_scale * epsilon_pred
-        # xt_pred = predict_start_from_noise(xt_noisy, kt, epsilon_pred, alpha_bar)
+        xt_pred_inv = predict_start_from_noise(xt_noisy, kt, epsilon_pred, alpha_bar)
+
+        xt_input = torch.cat([xt_noisy, zt_prev, k_embed, epsilon_pred], dim=-1)
+        xt_pred_learned = self.xt_prediction(xt_input)
+
+        xt_pred = inversion_mask * xt_pred_inv + (1.0 - inversion_mask) * xt_pred_learned
+
         zt_updated, _ = self.zt_transition(xt_pred)
+        xt_pred_output = self.fc_project_xt_output(xt_pred)
+        xt_pred_output = torch.sigmoid(xt_pred_output)
 
-        return xt_pred, epsilon_pred, zt_updated
+        return xt_pred_output, epsilon_pred, zt_updated
 
 def pretrain_layers(model, data, total_epochs, device):
     optimizer = AdaBelief(

@@ -45,7 +45,7 @@ def sample_whole_test(model, test_data, alpha_bar,sequence_dim, feature_dim, hid
             kt = torch.full((xt_noisy.shape[0], xt_noisy.shape[1]), 0, dtype=torch.long, device=device)
             x0_pred = predict_start_from_noise(xt_noisy, kt, epsilon_pred, alpha_bar)
         zt_prev = 0.7 * zt_prev + 0.3 * zt_updated.detach()
-        xt_pred = model.fc_project_xt_output(x0_pred)
-        predictions.append(xt_pred.squeeze(0))
+        # xt_pred = model.fc_project_xt_output(x0_pred)
+        predictions.append(x0_pred.squeeze(0))
         flag = False
     return predictions
