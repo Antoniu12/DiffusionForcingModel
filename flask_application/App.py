@@ -1,14 +1,14 @@
 from datetime import datetime
 
+import pandas as pd
 from flask import Flask, request, jsonify
 import torch
 import pickle
 import os
-import numpy as np
 
 from models.Lstm import LSTMRegressor
 from models.Transformer import TransformerRegressor
-from models.forecast import forecast_day_from_model_aep, forecast_day_from_model_h
+from flask_application.forecast import forecast_day_from_model_aep, forecast_day_from_model_h
 from flask_cors import CORS
 
 app = Flask(__name__)
@@ -141,6 +141,157 @@ def forecast_day():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
+@app.route("/stats/aep", methods=["GET"])
+def get_aes_stats():
+    data = request.json
+    house_id = data.get("house_id")
+    if not house_id:
+        return jsonify({"error": "Missing house_id"}), 400
+
+    try:
+        csv_path = f"../training sets/{house_id}_Wh.csv"
+        df = pd.read_csv(csv_path)
+        consumption = df.iloc[:, 1]
+
+        result = {
+            "house": house_id,
+            "consumption_mean": consumption.mean(),
+            "consumption_baseline": consumption.iloc[0],
+            "consumption_median": consumption.median()
+        }
+        return jsonify(result)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/house_stats", methods=["POST"])
+def get_h_stats():
+    data = request.json
+    house_id = data.get("house_id")
+    if not house_id:
+        return jsonify({"error": "Missing house_id"}), 400
+
+    try:
+        csv_path = f"../training sets/{house_id}_Wh.csv"
+        df = pd.read_csv(csv_path)
+
+        if house_id == "AEP":
+            consumption = df.iloc[:, 1]
+            result = {
+                "house": house_id,
+                "consumption_mean": consumption.mean(),
+                "consumption_baseline": consumption.iloc[0],
+                "consumption_median": consumption.median(),
+                "production_mean": None,
+                "production_baseline": None,
+                "production_median": None,
+                "consumption_series": consumption.tolist(),
+                "production_series": None
+            }
+        else:
+            df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+            df = df.set_index(df.columns[0])
+            hourly_df = df.resample("1H").sum()
+
+            consumption = hourly_df.iloc[:, 3]  # column 4 originally
+            production = hourly_df.iloc[:, 2]   # column 3 originally
+
+            result = {
+                "house": house_id,
+                "consumption_mean": consumption.mean(),
+                "consumption_baseline": consumption.iloc[0],
+                "consumption_median": consumption.median(),
+                "production_mean": production.mean(),
+                "production_baseline": production.iloc[0],
+                "production_median": production.median(),
+                "consumption_series": consumption.tolist(),
+                "production_series": production.tolist()
+            }
+
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/house_day_plot", methods=["POST"])
+def plot_house_day():
+    import numpy as np
+
+    data = request.json
+    house_id = data.get("house_id")
+    date_str = data.get("date")
+
+    if not house_id or not date_str:
+        return jsonify({"error": "Missing house_id or date (format: YYYY-MM-DD)"}), 400
+
+    try:
+        date = pd.to_datetime(date_str).date()  # <- Ensure it's a pure date
+        csv_path = f"../training sets/{house_id}_Wh.csv"
+        df = pd.read_csv(csv_path)
+
+        # Ensure datetime index is set
+        df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+        df.set_index(df.columns[0], inplace=True)
+
+        if house_id == "AEP":
+            df["date_only"] = df.index.date
+            day_data = df[df["date_only"] == date]
+
+
+            if day_data.empty:
+                return jsonify({"error": f"No data available for {date_str}"}), 404
+
+            consumption = day_data.iloc[:, 0]
+
+            result = {
+                "house": house_id,
+                "date": date_str,
+                "consumption_mean": float(consumption.mean()),
+                "consumption_baseline": float(consumption.iloc[0]),
+                "consumption_median": float(consumption.median()),
+                "production_mean": None,
+                "production_baseline": None,
+                "production_median": None,
+                "consumption_series": np.round(consumption.values, 5).tolist(),
+                "production_series": None
+            }
+
+        else:
+            hourly_df = df.resample("1h").sum()
+            hourly_df["date_only"] = hourly_df.index.date
+            day_data = hourly_df[hourly_df["date_only"] == date]
+
+
+            if day_data.empty:
+                return jsonify({"error": f"No data available for {date_str}"}), 404
+
+            consumption = day_data.iloc[:, 3]  # originally column 4
+            production = day_data.iloc[:, 2]   # originally column 3
+
+            result = {
+                "house": house_id,
+                "date": date_str,
+                "consumption_mean": float(consumption.mean()),
+                "consumption_baseline": float(consumption.iloc[0]),
+                "consumption_median": float(consumption.median()),
+                "production_mean": float(production.mean()),
+                "production_baseline": float(production.iloc[0]),
+                "production_median": float(production.median()),
+                "consumption_series": np.round(consumption.values, 5).tolist(),
+                "production_series": np.round(production.values, 5).tolist()
+            }
+
+        return jsonify(result)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+
+
 
 if __name__ == "__main__":
     app.run(debug=True)
