@@ -7,7 +7,7 @@ import numpy as np
 from DiffusionBase.DF_Backbone_NextToken import DFBackbone_NextToken
 from DiffusionBase.df_training_next_token import train_next_token_diffusion, rolling_next_token_prediction, \
     predict_with_uncertainty_next_token, predict_with_random_last_noise, \
-    autoregressive_forecast_with_pred_as_next
+    autoregressive_forecast
 
 # from DiffusionBase.diffusion_forcing_sampling import sample_whole_test, generate_predictions, next_hour_preddiction
 
@@ -30,7 +30,7 @@ from DiffusionBase.df_training_v2 import df_training, predict, predict_with_unce
 from plots import plot_test_predictions, plot_predictions_with_uncertainty
 
 #sa nu incerc pe H13!!!!
-file_path = './training sets/H2_Wh.csv'
+file_path = './training sets/H20_Wh.csv'
 save_path = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
 os.makedirs(save_path, exist_ok=True)
 logger = Logger(save_dir=save_path)
@@ -192,12 +192,12 @@ forecast = flatten_overlapping_windows_preds(predictions)
 true = flatten_overlapping_windows_targets(test_sequences)
 
 # Select correct feature index for "Production"
-forecast_prod = forecast[:, 1]
-true_prod = true[:, 1]
+forecast_prod = forecast[:, 0]
+true_prod = true[:, 0]
 
 plt.figure(figsize=(10, 5))
-plt.plot(true_prod, label="True Production")
-plt.plot(forecast_prod, label="Forecasted Production")
+plt.plot(true_prod, label="True Consumption")
+plt.plot(forecast_prod, label="Forecasted Consumption")
 plt.title("One-Step Forecast vs True Production")
 plt.xlabel("Time step")
 plt.ylabel("Normalized Production")

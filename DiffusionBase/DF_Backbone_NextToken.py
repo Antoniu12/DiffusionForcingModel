@@ -28,7 +28,6 @@ class DFBackbone_NextToken(nn.Module):
             nn.ReLU(),
             nn.Dropout(p=0.2),
             nn.Linear(hidden_dim, input_dim)
-            # nn.Sigmoid()
         )
         self.xt_head = nn.Sequential(
             nn.Linear(hidden_dim * 3, hidden_dim * 2),
@@ -38,7 +37,7 @@ class DFBackbone_NextToken(nn.Module):
         self.epsilon_head = nn.Linear(hidden_dim, hidden_dim)
 
     @staticmethod
-    def sinusoidal_embedding(kt, dim=32, max_k=999):
+    def sinusoidal_embedding(kt, dim=42, max_k=999):
         assert dim % 2 == 0
         device = kt.device
         kt = kt.unsqueeze(-1).float()
@@ -51,11 +50,9 @@ class DFBackbone_NextToken(nn.Module):
 
     def forward(self, zt_prev, xt_noisy, k, alpha_bar):
         B, T, H = xt_noisy.shape
-
         kt = k.float().unsqueeze(-1)
         normalized_kt = kt / 1000.0
         kt_to_feature = normalized_kt.expand(B, 1, H)
-
         full_kt_features = torch.zeros_like(xt_noisy)
         full_kt_features[:, -1:, :] = kt_to_feature
 

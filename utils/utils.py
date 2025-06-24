@@ -204,18 +204,14 @@ def charbonnier_loss(pred, target, epsilon=1e-3):
 def get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=None):
     max_k = max_k if max_k is not None else K - 1
 
-    # Cosine schedule from min_k to max_k
     progress = min(epoch / total_epochs, 1.0)
 
-    # Main schedule curve (cosine)
     k_mid = (min_k + max_k) / 2
     k_range = (max_k - min_k) / 2
 
-    # k_center follows cosine increasing from min_k to max_k
-    k_center = int(k_mid + k_range * np.cos(np.pi * (1 - progress)))  # inverted cosine
+    k_center = int(k_mid + k_range * np.cos(np.pi * (1 - progress)))
 
-    # Add flexibility by allowing sampling around center ± margin
-    margin = int((1 - progress) * k_range * 0.5)  # tighter as training progresses
+    margin = int((1 - progress) * k_range * 0.5)
     k_min_sched = max(min_k, k_center - margin)
     k_max_sched = min(max_k, k_center + margin)
 

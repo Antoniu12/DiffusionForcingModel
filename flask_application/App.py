@@ -6,10 +6,14 @@ import torch
 import pickle
 import os
 
+from DiffusionBase.DF_Backbone_NextToken import DFBackbone_NextToken
 from models.Lstm import LSTMRegressor
 from models.Transformer import TransformerRegressor
-from flask_application.forecast import forecast_day_from_model_aep, forecast_day_from_model_h
+from flask_application.forecast import forecast_day_from_model_aep, forecast_day_from_model_h, \
+    forecast_day_from_diffusion_h
 from flask_cors import CORS
+
+from utils import utils
 
 app = Flask(__name__)
 CORS(app)
@@ -17,6 +21,7 @@ CORS(app)
 LSTM_MODEL_PATH = "../trained_models/lstm/model/"
 TRANSFORMER_MODEL_PATH = "../trained_models/transformer/model/"
 SCALER_PATH = "../trained_models/lstm/scaler/"
+DIFFUSION_MODEL_PATH = "../trained_models/diffusion/model/"
 
 INPUT_DIM = 64
 HIDDEN_DIM = 512
@@ -35,6 +40,7 @@ def forecast_day():
     data = request.json
     house_id = data.get("house_id")
     date_str = data.get("date")
+    mode = data.get("mode")
     hidden_dim = 512
     if house_id == "AEP":
         input_dim = 5
@@ -48,37 +54,63 @@ def forecast_day():
     try:
         model_lstm_path = os.path.join(LSTM_MODEL_PATH, f"{house_id}.pth")
         model_transformer_path = os.path.join(TRANSFORMER_MODEL_PATH, f"{house_id}.pth")
+        model_diffusion_path = os.path.join(DIFFUSION_MODEL_PATH, f"{house_id}.pth")
         scaler_path = os.path.join(SCALER_PATH, f"{house_id}.pkl")
         csv_path = f"../training sets/{house_id}_Wh.csv"
 
         lstm_model = LSTMRegressor(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=input_dim)
-
         transformer_model = TransformerRegressor(input_dim=input_dim, hidden_dim=hidden_dim, output_dim=input_dim)
+        diffusion_model = DFBackbone_NextToken(input_dim=input_dim, hidden_dim=input_dim, seq_dim=24)
+
         if house_id == "AEP":
             lstm_result_consumption = forecast_day_from_model_aep(
-                lstm_model, target_date, csv_path, model_path=model_lstm_path, scaler_path=scaler_path, feature_index=0
+                lstm_model, target_date, csv_path, model_path=model_lstm_path, scaler_path=scaler_path,
+                feature_index=0, mode=mode
             )
 
             transformer_result_consumption = forecast_day_from_model_aep(
-                transformer_model, target_date, csv_path, model_path=model_transformer_path, scaler_path=scaler_path, feature_index=0
+                transformer_model, target_date, csv_path, model_path=model_transformer_path, scaler_path=scaler_path,
+                feature_index=0, mode=mode
             )
+
+            # diffusion_result_consumption = forecast_day_from_model_aep(
+            #     diffusion_model, target_date, csv_path, model_path=model_diffusion_path, scaler_path=scaler_path,
+            #     feature_index=0, mode=mode
+            # )
+
         else:
             lstm_result_consumption = forecast_day_from_model_h(
-                lstm_model, target_date, csv_path, model_path=model_lstm_path, scaler_path=scaler_path, feature_index=0
+                lstm_model, target_date, csv_path, model_path=model_lstm_path, scaler_path=scaler_path,
+                feature_index=0, mode=mode
             )
 
             transformer_result_consumption = forecast_day_from_model_h(
                 transformer_model, target_date, csv_path, model_path=model_transformer_path, scaler_path=scaler_path,
-                feature_index=0
+                feature_index=0, mode=mode
             )
 
             lstm_result_production = forecast_day_from_model_h(
-                lstm_model, target_date, csv_path, model_path=model_lstm_path, scaler_path=scaler_path, feature_index=1
+                lstm_model, target_date, csv_path, model_path=model_lstm_path, scaler_path=scaler_path,
+                feature_index=1, mode=mode
             )
 
             transformer_result_production = forecast_day_from_model_h(
                 transformer_model, target_date, csv_path, model_path=model_transformer_path, scaler_path=scaler_path,
-                feature_index=1
+                feature_index=1, mode=mode
+            )
+
+            K = 1000
+            betas = utils.cosine_beta_schedule(K)
+            alpha, alpha_bar = utils.get_alphas(betas)
+
+            diffusion_result_consumption = forecast_day_from_diffusion_h(
+                diffusion_model, target_date, csv_path, alpha, alpha_bar, K,
+                model_path=model_diffusion_path, scaler_path=scaler_path, feature_index=0, mode=mode
+            )
+
+            diffusion_result_production = forecast_day_from_diffusion_h(
+                diffusion_model, target_date, csv_path, alpha, alpha_bar, K,
+                model_path=model_diffusion_path, scaler_path=scaler_path, feature_index=1, mode=mode
             )
 
 
@@ -125,6 +157,11 @@ def forecast_day():
                 "transformer_smape_consumption": transformer_result_consumption["smape"],
                 "transformer_crps_consumption": transformer_result_consumption["crps"],
 
+                "diffusion_predictions_consumption": diffusion_result_consumption["predictions"],
+                "diffusion_r2_consumption": diffusion_result_consumption["r2_score"],
+                "diffusion_smape_consumption": diffusion_result_consumption["smape"],
+                "diffusion_crps_consumption": diffusion_result_consumption["crps"],
+
                 "lstm_predictions_production": lstm_result_production["predictions"],
                 "lstm_r2_production": lstm_result_production["r2_score"],
                 "lstm_smape_production": lstm_result_production["smape"],
@@ -133,9 +170,13 @@ def forecast_day():
                 "transformer_predictions_production": transformer_result_production["predictions"],
                 "transformer_r2_production": transformer_result_production["r2_score"],
                 "transformer_smape_production": transformer_result_production["smape"],
-                "transformer_crps_production": transformer_result_production["crps"]
-            })
+                "transformer_crps_production": transformer_result_production["crps"],
 
+                "diffusion_predictions_production": diffusion_result_production["predictions"],
+                "diffusion_r2_production": diffusion_result_production["r2_score"],
+                "diffusion_smape_production": diffusion_result_production["smape"],
+                "diffusion_crps_production": diffusion_result_production["crps"],
+            })
 
     except Exception as e:
         import traceback
@@ -194,8 +235,8 @@ def get_h_stats():
             df = df.set_index(df.columns[0])
             hourly_df = df.resample("1H").sum()
 
-            consumption = hourly_df.iloc[:, 3]  # column 4 originally
-            production = hourly_df.iloc[:, 2]   # column 3 originally
+            consumption = hourly_df.iloc[:, 3]
+            production = hourly_df.iloc[:, 2]
 
             result = {
                 "house": house_id,
@@ -228,11 +269,10 @@ def plot_house_day():
         return jsonify({"error": "Missing house_id or date (format: YYYY-MM-DD)"}), 400
 
     try:
-        date = pd.to_datetime(date_str).date()  # <- Ensure it's a pure date
+        date = pd.to_datetime(date_str).date()
         csv_path = f"../training sets/{house_id}_Wh.csv"
         df = pd.read_csv(csv_path)
 
-        # Ensure datetime index is set
         df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
         df.set_index(df.columns[0], inplace=True)
 
@@ -268,8 +308,8 @@ def plot_house_day():
             if day_data.empty:
                 return jsonify({"error": f"No data available for {date_str}"}), 404
 
-            consumption = day_data.iloc[:, 3]  # originally column 4
-            production = day_data.iloc[:, 2]   # originally column 3
+            consumption = day_data.iloc[:, 3]
+            production = day_data.iloc[:, 2]
 
             result = {
                 "house": house_id,
