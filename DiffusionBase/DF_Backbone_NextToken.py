@@ -2,16 +2,6 @@ import math
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from adabelief_pytorch import AdaBelief
-
-
-def predict_start_from_noise(xt_noisy, kt, noise, alpha_bar):
-    alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_noisy.shape[0], xt_noisy.shape[1], 1)
-    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-8))
-    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
-    x0 = (xt_noisy - sqrt_one_minus_alpha_bar * noise) / sqrt_alpha_bar
-    return x0
 
 class DFBackbone_NextToken(nn.Module):
     def __init__(self, input_dim, hidden_dim, seq_dim):

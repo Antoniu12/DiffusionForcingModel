@@ -5,17 +5,27 @@ import pickle
 from datetime import timedelta
 
 from properscoring import crps_ensemble
-from sklearn.metrics import r2_score
+from sklearn.metrics  import mean_absolute_error, mean_squared_error, r2_score
 
-from flask_application.generate_predictions import autoregressive_next_24, teacher_forcing_next_24
+
+from flask_application.GeneratePredictions import autoregressive_next_24, teacher_forcing_next_24
 from DataPreprocessing.preprocess import load_and_preprocess_data
-from DiffusionBase.df_training_next_token import autoregressive_forecast, teacher_forcing_forecast
+from DiffusionBase.DfTraining import autoregressive_forecast, teacher_forcing_forecast
 
 
 def smape(y_true, y_pred):
     return 100 * np.mean(
         2.0 * np.abs(y_pred - y_true) / (np.abs(y_pred) + np.abs(y_true) + 1e-8)
     )
+
+def mape(y_true, y_pred):
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    mask = np.abs(y_true) > 1e-8
+    if np.sum(mask) == 0:
+        return 0
+    return 100 * np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask]))
+
 
 def forecast_day_from_model_aep(model, target_date, csv_path, model_path=None, scaler_path=None,
                                 feature_index=0, hidden_dim=512, seq_length=24, mode="autoregressive"):
@@ -65,17 +75,20 @@ def forecast_day_from_model_aep(model, target_date, csv_path, model_path=None, s
         pred_aep.append(clamped)
 
     pred_aep = np.array(pred_aep)
-
+    mae_val = mean_absolute_error(true_values, pred_aep)
+    mse_val = mean_squared_error(true_values, pred_aep)
     r2 = r2_score(true_values, pred_aep)
     smape_val = smape(true_values, pred_aep)
-    crps_val = crps_ensemble(true_values, np.expand_dims(pred_aep, axis=1)).mean()
+    mape_val = mape(true_values, pred_aep)
 
     return {
         "predictions": pred_aep.tolist(),
         "true_values": true_values.tolist(),
+        "mae": mae_val,
+        "mse": mse_val,
         "r2_score": r2,
         "smape": smape_val,
-        "crps": crps_val
+        "mape": mape_val
     }
 
 def forecast_day_from_model_h(model, target_date, csv_path, model_path=None, scaler_path=None,
@@ -111,6 +124,7 @@ def forecast_day_from_model_h(model, target_date, csv_path, model_path=None, sca
     ground_truth_seq = window_tensor[24:48]
     if model_path:
         model.load_state_dict(torch.load(model_path, map_location=device))
+
     model.to(device)
     model.eval()
 
@@ -131,16 +145,20 @@ def forecast_day_from_model_h(model, target_date, csv_path, model_path=None, sca
         pred_consumption.append(denorm_value)
     pred_consumption = np.array(pred_consumption)
 
+    mae_val = mean_absolute_error(true_consumption, pred_consumption)
+    mse_val = mean_squared_error(true_consumption, pred_consumption)
     r2 = r2_score(true_consumption, pred_consumption)
     smape_val = smape(true_consumption, pred_consumption)
-    crps_val = crps_ensemble(true_consumption, np.expand_dims(pred_consumption, axis=1)).mean()
+    mape_val = mape(true_consumption, pred_consumption)
 
     return {
         "predictions": pred_consumption.tolist(),
         "true_values": true_consumption.tolist(),
+        "mae": mae_val,
+        "mse": mse_val,
         "r2_score": r2,
         "smape": smape_val,
-        "crps": crps_val
+        "mape": mape_val
     }
 
 def forecast_day_from_diffusion_h(
@@ -190,18 +208,22 @@ def forecast_day_from_diffusion_h(
         clamped_scaled = np.clip(pred_np[i, feature_index], 0.0, 1.0)
         modified[feature_index] = clamped_scaled
         denorm_value = scaler.inverse_transform([modified])[0][feature_index]
-        # clamped = max(0.0, denorm_value)
         pred_list.append(denorm_value)
     pred_list = np.array(pred_list)
 
+
+    mae_val = mean_absolute_error(true_values, pred_list)
+    mse_val = mean_squared_error(true_values, pred_list)
     r2 = r2_score(true_values, pred_list)
     smape_val = smape(true_values, pred_list)
-    crps_val = crps_ensemble(true_values, np.expand_dims(pred_list, axis=1)).mean()
+    mape_val = mape(true_values, pred_list)
 
     return {
         "predictions": pred_list.tolist(),
         "true_values": true_values.tolist(),
+        "mae": mae_val,
+        "mse": mse_val,
         "r2_score": r2,
         "smape": smape_val,
-        "crps": crps_val
+        "mape": mape_val
     }

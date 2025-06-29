@@ -130,9 +130,8 @@ def preprocess_aep_dataset(file_path, test_size=0.1, val_size=0.2):
     df = pd.read_csv(file_path, parse_dates=['Datetime'])
     df.set_index('Datetime', inplace=True)
     df = df.groupby('Datetime').mean()
-    df = df.asfreq('D')
+    df = df.asfreq('1h')
 
-    # Feature engineering
     df['hour'] = df.index.hour
     df['day'] = df.index.day
     df['weekday'] = df.index.weekday
@@ -151,10 +150,11 @@ def preprocess_aep_dataset(file_path, test_size=0.1, val_size=0.2):
     train_tensor = torch.tensor(train_df.values, dtype=torch.float32)
     val_tensor = torch.tensor(val_df.values, dtype=torch.float32)
     test_tensor = torch.tensor(test_df.values, dtype=torch.float32)
-
+    dataset_start_index = df.index[0]
     test_start_index = df.index[-len(test_tensor)]
     test_end_index = df.index[-1]
 
+    print(f"dataset starts at: {dataset_start_index}")
     print(f"Test set starts at: {test_start_index}")
     print(f"Test set ends at: {test_end_index}")
 

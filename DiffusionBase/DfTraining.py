@@ -6,22 +6,34 @@ from adabelief_pytorch import AdaBelief
 from torch import nn
 from torchmetrics import R2Score, SymmetricMeanAbsolutePercentageError
 
-from DiffusionBase.df_training_v2 import forward_diffuse, compute_epsilon_true, enable_dropout
-from utils.utils import compute_sampling_step, get_scheduled_k
+from utils.utils import get_scheduled_k
 
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+
+def smape(y_true, y_pred):
+    denominator = (np.abs(y_true) + np.abs(y_pred)) + 1e-8
+    return 100 * np.mean(2 * np.abs(y_pred - y_true) / denominator)
+def mape(y_true, y_pred):
+    y_true = np.where(np.abs(y_true) < 1e-8, 1e-8, y_true)
+    return 100 * np.mean(np.abs((y_true - y_pred) / y_true))
+
+
+def forward_diffuse(xt_true, kt, alpha_bar):
+    noise = torch.randn_like(xt_true)
+    alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_true.shape[0], xt_true.shape[1], 1)
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-8))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
+    return sqrt_alpha_bar * xt_true + sqrt_one_minus_alpha_bar * noise
+
+def compute_epsilon_true(xt_noisy, x_true, kt, alpha_bar):
+    alpha_t = alpha_bar.gather(0, kt.view(-1)).view(xt_noisy.shape[0], xt_noisy.shape[1], 1)
+    sqrt_alpha_bar = torch.sqrt(torch.clamp(alpha_t, min=1e-8))
+    sqrt_one_minus_alpha_bar = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-8))
+    epsilon_true = (xt_noisy - sqrt_alpha_bar * x_true) / sqrt_one_minus_alpha_bar
+    return epsilon_true
 
 def train_next_token_diffusion(model, data, validation_data, alpha, alpha_bar, K, total_epochs, device):
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-    # optimizer = AdaBelief(
-    #     filter(lambda p: p.requires_grad, model.parameters()),
-    #     lr=5e-4,
-    #     eps=1e-16,
-    #     betas=(0.9, 0.999),
-    #     weight_decay=1e-2,
-    #     rectify=True,
-    #     weight_decouple=True,
-    #     print_change_log=False
-    # )
     loss_fn = nn.MSELoss()
 
     val_r2_eps = R2Score().to(device)
@@ -51,8 +63,8 @@ def train_next_token_diffusion(model, data, validation_data, alpha, alpha_bar, K
             xt_pred, epsilon_pred, zt_prev = model(zt_prev, xt_noisy_full, kt, alpha_bar)
             zt_prev = zt_prev.detach()
 
-            loss_xt = (loss_fn(xt_pred, x_target) * 6 + loss_fn(xt_pred[:, :, 0], x_target[:, :, 0]) * 2 +
-                       loss_fn(xt_pred[:, :, 1], x_target[:, :, 1]) * 2)
+            loss_xt = (loss_fn(xt_pred, x_target) * 6 + loss_fn(xt_pred[:, :, 0], x_target[:, :, 0])* 4)# +
+            #            loss_fn(xt_pred[:, :, 1], x_target[:, :, 1]) * 2)
             loss_eps = loss_fn(epsilon_pred[:, -1:, :], epsilon_true)
             # loss_eps = loss_fn(epsilon_pred, epsilon_true)
 
@@ -200,7 +212,8 @@ def predict_with_random_last_noise(model, test_tensor, alpha, alpha_bar, K, devi
             xt_target_noisy = model.encoder(x_target_noisy)
             xt_noisy_full = torch.cat([xt_context, xt_target_noisy], dim=1)
 
-            xt_pred, epsilon_pred, zt_prev = model(zt_prev, xt_noisy_full, kt, alpha_bar)
+            xt_pred, epsilon_pred, zt_pred = model(zt_prev, xt_noisy_full, kt, alpha_bar)
+            zt_prev = zt_pred.detach()
 
             preds.append((
                 target.squeeze().cpu().numpy(),
@@ -210,6 +223,72 @@ def predict_with_random_last_noise(model, test_tensor, alpha, alpha_bar, K, devi
             ))
 
     return preds
+
+def predict_with_random_last_noise_2(
+    model, test_tensor, alpha, alpha_bar, K, device, scaler,
+    feature_index=0, start_offset=24
+):
+    model.eval()
+    preds = []
+    targets = []
+    zt_prev = torch.zeros((1, start_offset, model.fc_project_seq_to_hidden.out_features), device=device)
+
+    with torch.no_grad():
+        for t in test_tensor:
+            context = t[:-1, :].unsqueeze(0).to(device)
+            target = t[-1:, :].unsqueeze(0).to(device)
+            random_noise = torch.randn_like(target)
+            kt = torch.full((1, 1), K - 1, dtype=torch.long, device=device)
+
+            x_target_noisy = forward_diffuse(random_noise, kt, alpha_bar)
+            xt_context = model.encoder(context)
+            xt_target_noisy = model.encoder(x_target_noisy)
+            xt_noisy_full = torch.cat([xt_context, xt_target_noisy], dim=1)
+
+            xt_pred, epsilon_pred, zt_pred = model(zt_prev, xt_noisy_full, kt, alpha_bar)
+            zt_prev = zt_pred.detach()
+
+            pred_val = xt_pred.squeeze().cpu().numpy()[feature_index]
+            true_val = target.squeeze().cpu().numpy()[feature_index]
+
+            preds.append(pred_val)
+            targets.append(true_val)
+
+    preds = np.array(preds)
+    targets = np.array(targets)
+
+    preds = np.clip(preds, 0, 1)
+
+    preds_denorm = []
+    targets_denorm = []
+    for p, t in zip(preds, targets):
+        pred_vec = np.zeros(scaler.scale_.shape)
+        true_vec = np.zeros(scaler.scale_.shape)
+        pred_vec[feature_index] = p
+        true_vec[feature_index] = t
+        preds_denorm.append(scaler.inverse_transform([pred_vec])[0][feature_index])
+        targets_denorm.append(scaler.inverse_transform([true_vec])[0][feature_index])
+
+    preds_denorm = np.array(preds_denorm)
+    targets_denorm = np.array(targets_denorm)
+
+    mae = mean_absolute_error(targets_denorm, preds_denorm)
+    mse = mean_squared_error(targets_denorm, preds_denorm)
+    r2 = r2_score(targets_denorm, preds_denorm)
+    smape_val = smape(targets_denorm, preds_denorm)
+    mape_val = mape(targets_denorm, preds_denorm)
+
+    metrics = {
+        "MAE": mae,
+        "MSE": mse,
+        "R2": r2,
+        "SMAPE": smape_val,
+        "MAPE": mape_val,
+        "preds": preds_denorm,
+        "targets": targets_denorm,
+    }
+    return metrics
+
 
 
 def autoregressive_forecast(
@@ -221,25 +300,33 @@ def autoregressive_forecast(
 
     context_seq = context_seq.clone().detach().to(device)
     zt_prev = torch.zeros((1, 24, model.fc_project_seq_to_hidden.out_features), device=device)
-
     kt_zero = torch.zeros((1, 1), dtype=torch.long, device=device)
-    xt_hidden = model.encoder(context_seq.unsqueeze(0))
-    _, _, zt_prev = model(zt_prev, xt_hidden, kt_zero, alpha_bar)
-    zt_prev = zt_prev.detach()
 
-    current_window = context_seq.unsqueeze(0)
+    x_target = context_seq[-1:].unsqueeze(0)
+    xt_context = model.encoder(context_seq.unsqueeze(0))
+    xt_target = model.encoder(x_target)
+    xt_noisy_full = torch.cat([xt_context, xt_target], dim=1)
+    _, _, zt_pred = model(zt_prev, xt_noisy_full, kt_zero, alpha_bar)
+    zt_prev = zt_pred.detach()
+
+    current_window = context_seq[1:].unsqueeze(0).to(device)
 
     with torch.no_grad():
         for step in range(steps):
             random_token = torch.randn(1, 1, feat_dim).to(device)
             input_window = current_window.clone()
-            input_window[:, -1:] = random_token
 
-            xt_hidden = model.encoder(input_window)
+            kt = torch.full((1, 1), K - 1, dtype=torch.long, device=device)
+            random_token_diffused = forward_diffuse(random_token, kt, alpha_bar)
+
+            xt_true = model.encoder(input_window)
+            xt_target = model.encoder(random_token_diffused)
+
+            xt_hidden = torch.cat([xt_true, xt_target], dim=1)
             xt_pred, _, zt_prev = model(
                 zt_prev,
                 xt_hidden,
-                torch.full((1, 1), K - 1, dtype=torch.long, device=device),
+                kt,
                 alpha_bar
             )
             zt_prev = zt_prev.detach()
@@ -247,12 +334,7 @@ def autoregressive_forecast(
             pred_token = xt_pred[:, -1, :]
             preds.append(pred_token.squeeze(0).cpu())
 
-            next_window = torch.cat([
-                current_window[:, 1:, :],
-                pred_token.unsqueeze(0)
-            ], dim=1)
-            current_window = next_window
-
+            current_window = torch.cat([current_window[:, 1:], pred_token.view(1, 1, -1)], dim=1)
     return torch.stack(preds, dim=0)
 
 
@@ -273,23 +355,29 @@ def teacher_forcing_forecast(
     xt_context = model.encoder(context_seq.unsqueeze(0))
     xt_target = model.encoder(x_target)
     xt_noisy_full = torch.cat([xt_context, xt_target], dim=1)
-    _, _, zt_prev = model(zt_prev, xt_noisy_full, kt_zero, alpha_bar)
-    zt_prev = zt_prev.detach()
+    _, _, zt_pred = model(zt_prev, xt_noisy_full, kt_zero, alpha_bar)
+    zt_prev = zt_pred.detach()
 
-    current_window = torch.cat([context_seq[1:], torch.randn_like(context_seq[:1])], dim=0)
-    current_window = current_window.unsqueeze(0).to(device)
+    # current_window = torch.cat([context_seq[1:], torch.randn_like(context_seq[:1])], dim=0)
+    current_window = context_seq[1:].unsqueeze(0).to(device)
+
 
     with torch.no_grad():
         for step in range(steps):
             random_token = torch.randn(1, 1, feat_dim).to(device)
             input_window = current_window.clone()
-            input_window[:, -1:] = random_token
 
-            xt_hidden = model.encoder(input_window)
+            kt = torch.full((1, 1), K - 1, dtype=torch.long, device=device)
+            random_token_diffused = forward_diffuse(random_token, kt, alpha_bar)
+
+            xt_true = model.encoder(input_window)
+            xt_target = model.encoder(random_token)
+
+            xt_hidden = torch.cat([xt_true, xt_target], dim=1)
             xt_pred, _, zt_prev = model(
                 zt_prev,
                 xt_hidden,
-                torch.full((1, 1), K - 1, dtype=torch.long, device=device),
+                kt,
                 alpha_bar,
             )
             zt_prev = zt_prev.detach()
@@ -304,3 +392,8 @@ def teacher_forcing_forecast(
                 current_window = torch.cat([current_window[:, 1:], true_token], dim=1)
 
     return torch.stack(preds, dim=0)
+
+def enable_dropout(model):
+    for m in model.modules():
+        if isinstance(m, nn.Dropout):
+            m.train()

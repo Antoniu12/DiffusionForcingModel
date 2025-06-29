@@ -2,11 +2,22 @@ import copy
 
 import torch
 from torch import nn, optim
+import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+def smape(y_true, y_pred):
+    denominator = (np.abs(y_true) + np.abs(y_pred)) + 1e-8
+    diff = np.abs(y_pred - y_true)
+    return 100 * np.mean(2.0 * diff / denominator)
+
+def mape(y_true, y_pred):
+    y_true_safe = np.where(np.abs(y_true) < 1e-8, 1e-8, y_true)
+    return 100 * np.mean(np.abs((y_true - y_pred) / y_true_safe))
 def train_model(model, train_loader, val_loader, num_epochs=100, patience=10, device='cpu'):
     model.to(device)
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
+
 
     best_val_loss = float('inf')
     counter = 0
@@ -51,3 +62,56 @@ def train_model(model, train_loader, val_loader, num_epochs=100, patience=10, de
                 break
 
     model.load_state_dict(best_model_wts)
+
+def evaluate_test_dataset(
+    model, test_loader, scaler, feature_index=0, device='cpu', clamp_zero=True
+):
+    model.eval()
+    preds = []
+    targets = []
+
+    with torch.no_grad():
+        for x_batch, y_batch in test_loader:
+            x_batch = x_batch.to(device)
+            y_batch = y_batch.to(device)
+            outputs = model(x_batch)
+            out = outputs[:, -1, feature_index].cpu().numpy().flatten()
+            tgt = y_batch[:, -1, feature_index].cpu().numpy().flatten()
+            preds.append(out)
+            targets.append(tgt)
+
+    preds = np.concatenate(preds)
+    targets = np.concatenate(targets)
+
+    if clamp_zero:
+        preds = np.clip(preds, 0, 1)
+
+    preds_denorm = []
+    targets_denorm = []
+    for p, t in zip(preds, targets):
+        pred_vec = np.zeros(scaler.scale_.shape)
+        true_vec = np.zeros(scaler.scale_.shape)
+        pred_vec[feature_index] = p
+        true_vec[feature_index] = t
+        preds_denorm.append(scaler.inverse_transform([pred_vec])[0][feature_index])
+        targets_denorm.append(scaler.inverse_transform([true_vec])[0][feature_index])
+
+    preds_denorm = np.array(preds_denorm)
+    targets_denorm = np.array(targets_denorm)
+
+    mae = mean_absolute_error(targets_denorm, preds_denorm)
+    mse = mean_squared_error(targets_denorm, preds_denorm)
+    r2 = r2_score(targets_denorm, preds_denorm)
+    smape_val = smape(targets_denorm, preds_denorm)
+    mape_val = mape(targets_denorm, preds_denorm)
+
+    metrics = {
+        "MAE": mae,
+        "MSE": mse,
+        "R2": r2,
+        "SMAPE": smape_val,
+        "MAPE": mape_val,
+        "preds": preds_denorm,
+        "targets": targets_denorm,
+    }
+    return metrics

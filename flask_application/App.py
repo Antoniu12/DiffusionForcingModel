@@ -1,5 +1,6 @@
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
 import torch
@@ -9,7 +10,7 @@ import os
 from DiffusionBase.DF_Backbone_NextToken import DFBackbone_NextToken
 from models.Lstm import LSTMRegressor
 from models.Transformer import TransformerRegressor
-from flask_application.forecast import forecast_day_from_model_aep, forecast_day_from_model_h, \
+from flask_application.Forecast import forecast_day_from_model_aep, forecast_day_from_model_h, \
     forecast_day_from_diffusion_h
 from flask_cors import CORS
 
@@ -121,14 +122,18 @@ def forecast_day():
                 "true_values_consumption": lstm_result_consumption["true_values"],
                 "true_values_production": None,
                 "lstm_predictions_consumption": lstm_result_consumption["predictions"],
+                "lstm_mae_consumption": lstm_result_consumption["mae"],
+                "lstm_mse_consumption": lstm_result_consumption["mse"],
                 "lstm_r2_consumption": lstm_result_consumption["r2_score"],
                 "lstm_smape_consumption": lstm_result_consumption["smape"],
-                "lstm_crps_consumption": lstm_result_consumption["crps"],
+                "lstm_mape_consumption": lstm_result_consumption["mape"],
 
                 "transformer_predictions_consumption": transformer_result_consumption["predictions"],
+                "transformer_mae_consumption": transformer_result_consumption["mae"],
+                "transformer_mse_consumption": transformer_result_consumption["mse"],
                 "transformer_r2_consumption": transformer_result_consumption["r2_score"],
                 "transformer_smape_consumption": transformer_result_consumption["smape"],
-                "transformer_crps_consumption": transformer_result_consumption["crps"],
+                "transformer_mape_consumption": transformer_result_consumption["mape"],
 
                 "lstm_predictions_production": None,
                 "lstm_r2_production": None,
@@ -148,34 +153,46 @@ def forecast_day():
                 "true_values_production": lstm_result_production["true_values"],
 
                 "lstm_predictions_consumption": lstm_result_consumption["predictions"],
+                "lstm_mae_consumption": lstm_result_consumption["mae"],
+                "lstm_mse_consumption": lstm_result_consumption["mse"],
                 "lstm_r2_consumption": lstm_result_consumption["r2_score"],
                 "lstm_smape_consumption": lstm_result_consumption["smape"],
-                "lstm_crps_consumption": lstm_result_consumption["crps"],
+                "lstm_mape_consumption": lstm_result_consumption["mape"],
 
                 "transformer_predictions_consumption": transformer_result_consumption["predictions"],
+                "transformer_mae_consumption": transformer_result_consumption["mae"],
+                "transformer_mse_consumption": transformer_result_consumption["mse"],
                 "transformer_r2_consumption": transformer_result_consumption["r2_score"],
                 "transformer_smape_consumption": transformer_result_consumption["smape"],
-                "transformer_crps_consumption": transformer_result_consumption["crps"],
+                "transformer_mape_consumption": transformer_result_consumption["mape"],
 
                 "diffusion_predictions_consumption": diffusion_result_consumption["predictions"],
+                "diffusion_mae_consumption": diffusion_result_consumption["mae"],
+                "diffusion_mse_consumption": diffusion_result_consumption["mse"],
                 "diffusion_r2_consumption": diffusion_result_consumption["r2_score"],
                 "diffusion_smape_consumption": diffusion_result_consumption["smape"],
-                "diffusion_crps_consumption": diffusion_result_consumption["crps"],
+                "diffusion_mape_consumption": diffusion_result_consumption["mape"],
 
                 "lstm_predictions_production": lstm_result_production["predictions"],
+                "lstm_mae_production": lstm_result_production["mae"],
+                "lstm_mse_production": lstm_result_production["mse"],
                 "lstm_r2_production": lstm_result_production["r2_score"],
                 "lstm_smape_production": lstm_result_production["smape"],
-                "lstm_crps_production": lstm_result_production["crps"],
+                "lstm_mape_production": lstm_result_production["mape"],
 
                 "transformer_predictions_production": transformer_result_production["predictions"],
+                "transformer_mae_production": transformer_result_production["mae"],
+                "transformer_mse_production": transformer_result_production["mse"],
                 "transformer_r2_production": transformer_result_production["r2_score"],
                 "transformer_smape_production": transformer_result_production["smape"],
-                "transformer_crps_production": transformer_result_production["crps"],
+                "transformer_mape_production": transformer_result_production["mape"],
 
                 "diffusion_predictions_production": diffusion_result_production["predictions"],
+                "diffusion_mae_production": diffusion_result_production["mae"],
+                "diffusion_mse_production": diffusion_result_production["mse"],
                 "diffusion_r2_production": diffusion_result_production["r2_score"],
                 "diffusion_smape_production": diffusion_result_production["smape"],
-                "diffusion_crps_production": diffusion_result_production["crps"],
+                "diffusion_mape_production": diffusion_result_production["mape"]
             })
 
     except Exception as e:
@@ -218,17 +235,55 @@ def get_h_stats():
         df = pd.read_csv(csv_path)
 
         if house_id == "AEP":
-            consumption = df.iloc[:, 1]
+            df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
+            df = df.set_index(df.columns[0])
+            hourly_df = df.resample("1H").sum()
+
+            consumption = hourly_df.iloc[:, 0]
+            timestamps = [ts.strftime("%Y-%m-%d") for ts in consumption.index]
+            start_date = consumption.index[0].strftime("%Y-%m-%d")
+            end_date = consumption.index[-1].strftime("%Y-%m-%d")
+
+            days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            grouped_c = consumption.groupby(consumption.index.dayofweek)
+
+            daily_stats = {}
+            for i, day in enumerate(days):
+                daily_stats[day] = {
+                    "consumption_max": grouped_c.max().get(i, float('nan')),
+                    "consumption_min": grouped_c.min().get(i, float('nan')),
+                    "consumption_mean": grouped_c.mean().get(i, float('nan')),
+                    "production_max": None,
+                    "production_min": None,
+                    "production_mean": None,
+                }
+
+            weekly_mean_consumption = consumption.resample('W').mean().mean()
+            monthly_mean_consumption = consumption.resample('M').mean().mean()
+            pct_positive_consumption = (consumption > 0).sum() / len(consumption) * 100
+
             result = {
                 "house": house_id,
+                "start_date": start_date,
+                "end_date": end_date,
                 "consumption_mean": consumption.mean(),
                 "consumption_baseline": consumption.iloc[0],
                 "consumption_median": consumption.median(),
+                "consumption_std": consumption.std(),
                 "production_mean": None,
                 "production_baseline": None,
                 "production_median": None,
+                "production_std": None,
+                "timestamps": timestamps,
                 "consumption_series": consumption.tolist(),
-                "production_series": None
+                "production_series": None,
+                "daily_stats": daily_stats,
+                "weekly_mean_consumption": weekly_mean_consumption,
+                "monthly_mean_consumption": monthly_mean_consumption,
+                "weekly_mean_production": None,
+                "monthly_mean_production": None,
+                "percent_positive_consumption": pct_positive_consumption,
+                "percent_positive_production": None,
             }
         else:
             df.iloc[:, 0] = pd.to_datetime(df.iloc[:, 0])
@@ -238,17 +293,55 @@ def get_h_stats():
             consumption = hourly_df.iloc[:, 3]
             production = hourly_df.iloc[:, 2]
 
+            days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+            grouped_c = consumption.groupby(consumption.index.dayofweek)
+            grouped_p = production.groupby(production.index.dayofweek)
+
+            daily_stats = {}
+            for i, day in enumerate(days):
+                daily_stats[day] = {
+                    "consumption_max": grouped_c.max().get(i, np.nan),
+                    "consumption_min": grouped_c.min().get(i, np.nan),
+                    "consumption_mean": grouped_c.mean().get(i, np.nan),
+                    "production_max": grouped_p.max().get(i, np.nan),
+                    "production_min": grouped_p.min().get(i, np.nan),
+                    "production_mean": grouped_p.mean().get(i, np.nan),
+                }
+
+            weekly_mean_consumption = consumption.resample('W').mean().mean()
+            monthly_mean_consumption = consumption.resample('M').mean().mean()
+            weekly_mean_production = production.resample('W').mean().mean()
+            monthly_mean_production = production.resample('M').mean().mean()
+
+            pct_positive_consumption = (consumption > 0).sum() / len(consumption) * 100
+            pct_positive_production = (production > 0).sum() / len(production) * 100
+
+            timestamps = [ts.strftime("%Y-%m-%d") for ts in consumption.index]
+            start_date = consumption.index[0].strftime("%Y-%m-%d")
+            end_date = consumption.index[-1].strftime("%Y-%m-%d")
+
             result = {
                 "house": house_id,
+                "start_date": start_date,
+                "end_date": end_date,
                 "consumption_mean": consumption.mean(),
                 "consumption_baseline": consumption.iloc[0],
-                "consumption_median": consumption.median(),
                 "production_mean": production.mean(),
                 "production_baseline": production.iloc[0],
-                "production_median": production.median(),
+                "consumption_std": consumption.std(),
+                "production_std": production.std(),
+                "timestamps": timestamps,
                 "consumption_series": consumption.tolist(),
-                "production_series": production.tolist()
+                "production_series": production.tolist(),
+                "daily_stats": daily_stats,
+                "weekly_mean_consumption": weekly_mean_consumption,
+                "monthly_mean_consumption": monthly_mean_consumption,
+                "weekly_mean_production": weekly_mean_production,
+                "monthly_mean_production": monthly_mean_production,
+                "percent_positive_consumption": pct_positive_consumption,
+                "percent_positive_production": pct_positive_production,
             }
+
 
         return jsonify(result)
 

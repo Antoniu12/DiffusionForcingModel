@@ -1,6 +1,19 @@
 import matplotlib
 from datetime import datetime
 import os
+from collections import defaultdict
+import os
+import numpy as np
+import plotly.graph_objs as go
+import plotly.io as pio
+import os
+import numpy as np
+import matplotlib.pyplot as plt
+import torch
+from utils.utils import plotting_preprocess_epsilon
+import plotly.graph_objs as go
+import plotly.io as pio
+import os
 
 import numpy as np
 import torch
@@ -15,7 +28,7 @@ class TrainingPlotter:
         self.r2_score_listxt = []
         self.smape_score_list = []
         if save_dir is None:
-            self.save_dir = os.path.join("plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
+            self.save_dir = os.path.join("../plots", datetime.now().strftime("%Y-%m-%d_%H-%M"))
         else:
             self.save_dir = save_dir
         os.makedirs(self.save_dir, exist_ok=True)
@@ -50,13 +63,6 @@ class TrainingPlotter:
         self.plot_and_save(epochs, self.smape_score_list, "SMAPE (%)", "SMAPE (%)", "Training SMAPE Over Epochs",
                            "smape.png")
 def plot_test_predictions(test_results, scaler, save_dir):
-    from collections import defaultdict
-    import os
-    import numpy as np
-    import plotly.graph_objs as go
-    import plotly.io as pio
-    from utils.utils import plotting_preprocess_epsilon
-
 
     pred_dict_consumption = defaultdict(list)
     true_dict_consumption = {}
@@ -68,8 +74,8 @@ def plot_test_predictions(test_results, scaler, save_dir):
 
     for idx, (xt_true, xt_pred, epsilon_pred, epsilon_true) in enumerate(test_results):
         t = global_timestep + idx
-        pred_dict_consumption[t].append(xt_pred[0])  # index 0 for "consumption"
-        pred_dict_production[t].append(xt_pred[1])  # index 1 for "production"
+        pred_dict_consumption[t].append(xt_pred[0])
+        pred_dict_production[t].append(xt_pred[1])
 
         if t not in true_dict_consumption:
             true_dict_consumption[t] = xt_true[0]
@@ -165,7 +171,6 @@ def plot_test_predictions(test_results, scaler, save_dir):
     pio.write_html(fig_production, file=os.path.join(save_dir, "xt_production_interval_plotly.html"), auto_open=True)
 
 
-    # Plot noise
     epsilon_true_all = [e for _, _, _, e in test_results]
     epsilon_pred_all = [e for _, _, e, _ in test_results]
     epsilon_true_flat, epsilon_pred_flat = plotting_preprocess_epsilon(epsilon_true_all, epsilon_pred_all)
@@ -185,25 +190,17 @@ def plot_test_predictions(test_results, scaler, save_dir):
     pio.write_html(fig_eps, file=os.path.join(save_dir, "epsilon_noise_plotly.html"), auto_open=True)
 
 def plot_predictions_with_uncertainty(predictions, save_dir):
-    import plotly.graph_objs as go
-    import plotly.io as pio
-    import os
-
-
     timesteps = predictions["timesteps"]
     xt_true_all = predictions["xt_true"]
     xt_pred_all = predictions["xt_pred_mean"]
     xt_std_all = predictions["xt_pred_std"]
 
-    # STD band (68% confidence)
     xt_upper_std = [m + s for m, s in zip(xt_pred_all, xt_std_all)]
     xt_lower_std = [m - s for m, s in zip(xt_pred_all, xt_std_all)]
 
-    # 95% confidence band
     xt_upper_95 = [m + 1.96 * s for m, s in zip(xt_pred_all, xt_std_all)]
     xt_lower_95 = [m - 1.96 * s for m, s in zip(xt_pred_all, xt_std_all)]
 
-    # Plotting
     trace_true = go.Scatter(
         x=timesteps, y=xt_true_all,
         mode='lines', name='True Consumption',
@@ -215,7 +212,6 @@ def plot_predictions_with_uncertainty(predictions, save_dir):
         line=dict(color='rgb(220, 20, 60)', width=2)
     )
 
-    # 95% confidence interval
     trace_band_lower_95 = go.Scatter(
         x=timesteps,
         y=xt_lower_95,
@@ -235,7 +231,6 @@ def plot_predictions_with_uncertainty(predictions, save_dir):
         hoverinfo='skip'
     )
 
-    # ±1 STD interval (front)
     trace_band_lower_std = go.Scatter(
         x=timesteps,
         y=xt_lower_std,
@@ -271,11 +266,6 @@ def plot_predictions_with_uncertainty(predictions, save_dir):
     )
 
     pio.write_html(fig, file=os.path.join(save_dir, "xt_mc_uncertainty.html"), auto_open=True)
-
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
 
 def plot_diffusion_forecast(context, forecast, ground_truth=None, column="Consumption",
                             save_path=None, title="Diffusion Forecast", plot_length=24):
