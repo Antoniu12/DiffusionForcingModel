@@ -26,18 +26,6 @@ class DFBackbone_NextToken(nn.Module):
         )
         self.epsilon_head = nn.Linear(hidden_dim, hidden_dim)
 
-    @staticmethod
-    def sinusoidal_embedding(kt, dim=42, max_k=999):
-        assert dim % 2 == 0
-        device = kt.device
-        kt = kt.unsqueeze(-1).float()
-        freqs = torch.exp(-math.log(max_k) * torch.arange(0, dim, 2, device=device) / dim)
-        freqs = freqs.view(1, 1, -1)
-
-        angles = kt * freqs
-        embed = torch.cat([torch.sin(angles), torch.cos(angles)], dim=-1)
-        return embed
-
     def forward(self, zt_prev, xt_noisy, k, alpha_bar):
         B, T, H = xt_noisy.shape
         kt = k.float().unsqueeze(-1)

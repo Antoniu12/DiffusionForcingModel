@@ -4,28 +4,13 @@ import pandas as pd
 import pickle
 from datetime import timedelta
 
-from properscoring import crps_ensemble
 from sklearn.metrics  import mean_absolute_error, mean_squared_error, r2_score
-
+from torchmetrics.regression import MeanAbsolutePercentageError
+from torchmetrics.regression import SymmetricMeanAbsolutePercentageError
 
 from flask_application.GeneratePredictions import autoregressive_next_24, teacher_forcing_next_24
 from DataPreprocessing.preprocess import load_and_preprocess_data
 from DiffusionBase.DfTraining import autoregressive_forecast, teacher_forcing_forecast
-
-
-def smape(y_true, y_pred):
-    return 100 * np.mean(
-        2.0 * np.abs(y_pred - y_true) / (np.abs(y_pred) + np.abs(y_true) + 1e-8)
-    )
-
-def mape(y_true, y_pred):
-    y_true = np.array(y_true)
-    y_pred = np.array(y_pred)
-    mask = np.abs(y_true) > 1e-8
-    if np.sum(mask) == 0:
-        return 0
-    return 100 * np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask]))
-
 
 def forecast_day_from_model_aep(model, target_date, csv_path, model_path=None, scaler_path=None,
                                 feature_index=0, hidden_dim=512, seq_length=24, mode="autoregressive"):
@@ -78,8 +63,12 @@ def forecast_day_from_model_aep(model, target_date, csv_path, model_path=None, s
     mae_val = mean_absolute_error(true_values, pred_aep)
     mse_val = mean_squared_error(true_values, pred_aep)
     r2 = r2_score(true_values, pred_aep)
-    smape_val = smape(true_values, pred_aep)
-    mape_val = mape(true_values, pred_aep)
+    mape = MeanAbsolutePercentageError()
+    smape = SymmetricMeanAbsolutePercentageError()
+    smape_val = smape(torch.tensor(pred_aep), torch.tensor(true_values))
+    mape_val = mape(torch.tensor(pred_aep), torch.tensor(true_values))
+    smape_val = smape_val.item() * 100
+    mape_val = mape_val.item() * 100
 
     return {
         "predictions": pred_aep.tolist(),
@@ -141,15 +130,19 @@ def forecast_day_from_model_h(model, target_date, csv_path, model_path=None, sca
         clamped_scaled = np.clip(pred_np[i, feature_index], 0.0, 1.0)
         modified[feature_index] = clamped_scaled
         denorm_value = scaler.inverse_transform([modified])[0][feature_index]
-        # clamped = max(0.0, denorm_value)
-        pred_consumption.append(denorm_value)
+        clamped = max(0.0, denorm_value)
+        pred_consumption.append(clamped)
     pred_consumption = np.array(pred_consumption)
 
     mae_val = mean_absolute_error(true_consumption, pred_consumption)
     mse_val = mean_squared_error(true_consumption, pred_consumption)
     r2 = r2_score(true_consumption, pred_consumption)
-    smape_val = smape(true_consumption, pred_consumption)
-    mape_val = mape(true_consumption, pred_consumption)
+    mape = MeanAbsolutePercentageError()
+    smape = SymmetricMeanAbsolutePercentageError()
+    smape_val = smape(torch.tensor(pred_consumption), torch.tensor(true_consumption))
+    mape_val = mape(torch.tensor(pred_consumption), torch.tensor(true_consumption))
+    smape_val = smape_val.item() * 100
+    mape_val = mape_val.item() * 100
 
     return {
         "predictions": pred_consumption.tolist(),
@@ -208,18 +201,97 @@ def forecast_day_from_diffusion_h(
         clamped_scaled = np.clip(pred_np[i, feature_index], 0.0, 1.0)
         modified[feature_index] = clamped_scaled
         denorm_value = scaler.inverse_transform([modified])[0][feature_index]
-        pred_list.append(denorm_value)
+        clamped = max(0.0, denorm_value)
+        pred_list.append(clamped)
     pred_list = np.array(pred_list)
 
 
     mae_val = mean_absolute_error(true_values, pred_list)
     mse_val = mean_squared_error(true_values, pred_list)
     r2 = r2_score(true_values, pred_list)
-    smape_val = smape(true_values, pred_list)
-    mape_val = mape(true_values, pred_list)
+    mape = MeanAbsolutePercentageError()
+    smape = SymmetricMeanAbsolutePercentageError()
+    smape_val = smape(torch.tensor(pred_list), torch.tensor(true_values))
+    mape_val = mape(torch.tensor(pred_list), torch.tensor(true_values))
+    smape_val = smape_val.item() * 100
+    mape_val = mape_val.item() * 100
 
     return {
         "predictions": pred_list.tolist(),
+        "true_values": true_values.tolist(),
+        "mae": mae_val,
+        "mse": mse_val,
+        "r2_score": r2,
+        "smape": smape_val,
+        "mape": mape_val
+    }
+
+def forecast_day_from_diffusion_aep(model, target_date, csv_path, alpha, alpha_bar, K, model_path=None, scaler_path=None,
+                                    feature_index=1, hidden_dim=512, seq_length=24, device="cpu", mode="autoregressive"):
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    start_time = target_date - timedelta(days=1)
+    end_time = target_date + timedelta(hours=23)
+    all_data_df = pd.read_csv(csv_path, parse_dates=["Datetime"])
+    all_data_df = all_data_df.sort_values("Datetime").drop_duplicates("Datetime")
+    mask = (all_data_df["Datetime"] >= start_time) & (all_data_df["Datetime"] <= end_time)
+    subset_df = all_data_df.loc[mask].copy().reset_index(drop=True)
+    assert len(subset_df) == 48, "Expected exactly 48 hourly data points (1 day input + 1 day target)."
+
+    with open(scaler_path, "rb") as f:
+        scaler = pickle.load(f)
+
+    subset_df["hour"] = subset_df["Datetime"].dt.hour
+    subset_df["day"] = subset_df["Datetime"].dt.day
+    subset_df["weekday"] = subset_df["Datetime"].dt.weekday
+    subset_df["month"] = subset_df["Datetime"].dt.month
+
+    feature_cols = ['AEP_MW', 'hour', 'day', 'weekday', 'month']
+    scaled_input = scaler.transform(subset_df[feature_cols])
+    input_tensor = torch.tensor(scaled_input, dtype=torch.float32).to(device)
+
+    context_seq = input_tensor[:seq_length]
+    true_values = subset_df.iloc[seq_length:]["AEP_MW"].values
+    ground_truth_seq = input_tensor[24:48]
+
+    if model_path:
+        model.load_state_dict(torch.load(model_path, map_location=device))
+    model.to(device)
+    model.eval()
+    if mode == "autoregressive":
+        predictions = autoregressive_forecast(
+            model, context_seq, alpha, alpha_bar, K, device=device, steps=24
+        )
+    elif mode == "teacher_forcing":
+        predictions = teacher_forcing_forecast(
+            model, context_seq, ground_truth_seq, alpha, alpha_bar, K, device=device, steps=24
+        )
+    pred_np = predictions.cpu().numpy()
+
+    context_last = context_seq[-1].cpu().numpy()
+    pred_aep = []
+    for i in range(24):
+        modified = context_last.copy()
+        modified[feature_index] = pred_np[i, feature_index]
+        denorm_value = scaler.inverse_transform([modified])[0][feature_index]
+        clamped = max(0.0, denorm_value)
+        pred_aep.append(clamped)
+
+    pred_aep = np.array(pred_aep)
+    mae_val = mean_absolute_error(true_values, pred_aep)
+    mse_val = mean_squared_error(true_values, pred_aep)
+    r2 = r2_score(true_values, pred_aep)
+    mape = MeanAbsolutePercentageError()
+    smape = SymmetricMeanAbsolutePercentageError()
+    smape_val = smape(torch.tensor(pred_aep), torch.tensor(true_values))
+    mape_val = mape(torch.tensor(pred_aep), torch.tensor(true_values))
+    smape_val = smape_val.item() * 100
+    mape_val = mape_val.item() * 100
+
+
+    return {
+        "predictions": pred_aep.tolist(),
         "true_values": true_values.tolist(),
         "mae": mae_val,
         "mse": mse_val,

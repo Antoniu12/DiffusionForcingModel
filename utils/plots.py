@@ -1,15 +1,7 @@
 import matplotlib
 from datetime import datetime
-import os
 from collections import defaultdict
-import os
-import numpy as np
-import plotly.graph_objs as go
-import plotly.io as pio
-import os
-import numpy as np
-import matplotlib.pyplot as plt
-import torch
+
 from utils.utils import plotting_preprocess_epsilon
 import plotly.graph_objs as go
 import plotly.io as pio
@@ -62,6 +54,7 @@ class TrainingPlotter:
                            "Training R² epsilon Score Over Epochs", "r2_score.png")
         self.plot_and_save(epochs, self.smape_score_list, "SMAPE (%)", "SMAPE (%)", "Training SMAPE Over Epochs",
                            "smape.png")
+
 def plot_test_predictions(test_results, scaler, save_dir):
 
     pred_dict_consumption = defaultdict(list)
@@ -132,7 +125,6 @@ def plot_test_predictions(test_results, scaler, save_dir):
     )
     pio.write_html(fig_consumption, file=os.path.join(save_dir, "xt_consumption_interval_plotly.html"), auto_open=True)
 
-    # --- Plot Production ---
     trace_true_p = go.Scatter(
         x=timesteps, y=true_flat_production,
         mode='lines', name='True Production',
@@ -269,19 +261,6 @@ def plot_predictions_with_uncertainty(predictions, save_dir):
 
 def plot_diffusion_forecast(context, forecast, ground_truth=None, column="Consumption",
                             save_path=None, title="Diffusion Forecast", plot_length=24):
-    """
-    Plots the last `plot_length` steps of context, forecast, and optionally ground truth.
-
-    Parameters:
-    - context (Tensor or ndarray): shape (T_context,). The known past.
-    - forecast (Tensor or ndarray): shape (T_forecast,). The predicted future.
-    - ground_truth (Tensor or ndarray, optional): shape (T_forecast,). The actual future.
-    - column (str): "Consumption" or "Production" (ignored here, kept for compatibility).
-    - save_path (str): if provided, saves the figure to disk.
-    - title (str): Title of the plot.
-    - plot_length (int): Number of recent time steps to plot.
-    """
-
     def to_numpy(x):
         if isinstance(x, torch.Tensor):
             return x.detach().cpu().numpy()
@@ -318,9 +297,6 @@ def plot_diffusion_forecast(context, forecast, ground_truth=None, column="Consum
 
 
 def plot_flattened_consumption(true_tensor, pred_tensor, feature_index=0, max_points=500):
-    """
-    Plot true vs predicted values from flattened overlapping windows.
-    """
     if isinstance(true_tensor, torch.Tensor):
         true_tensor = true_tensor.detach().cpu()
     if isinstance(pred_tensor, torch.Tensor):

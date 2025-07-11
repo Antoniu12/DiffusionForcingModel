@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 
-
 class TransformerRegressor(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, nhead=4, num_layers=2, dim_feedforward=64, dropout=0.1):
         super().__init__()

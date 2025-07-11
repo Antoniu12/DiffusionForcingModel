@@ -1,3 +1,0 @@
-confidence interval
-la loss parametrii dinamici pe viitor.
-improve la noise sudden change

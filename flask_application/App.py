@@ -11,7 +11,7 @@ from DiffusionBase.DF_Backbone_NextToken import DFBackbone_NextToken
 from models.Lstm import LSTMRegressor
 from models.Transformer import TransformerRegressor
 from flask_application.Forecast import forecast_day_from_model_aep, forecast_day_from_model_h, \
-    forecast_day_from_diffusion_h
+    forecast_day_from_diffusion_h, forecast_day_from_diffusion_aep
 from flask_cors import CORS
 
 from utils import utils
@@ -74,10 +74,15 @@ def forecast_day():
                 feature_index=0, mode=mode
             )
 
-            # diffusion_result_consumption = forecast_day_from_model_aep(
-            #     diffusion_model, target_date, csv_path, model_path=model_diffusion_path, scaler_path=scaler_path,
-            #     feature_index=0, mode=mode
-            # )
+            K = 1000
+            betas = utils.cosine_beta_schedule(K)
+            alpha, alpha_bar = utils.get_alphas(betas)
+            alpha = alpha.to(device)
+            alpha_bar = alpha_bar.to(device)
+            diffusion_result_consumption = forecast_day_from_diffusion_aep(
+                diffusion_model, target_date, csv_path, alpha, alpha_bar, K,
+                model_path=model_diffusion_path, scaler_path=scaler_path, feature_index=0, mode=mode
+            )
 
         else:
             lstm_result_consumption = forecast_day_from_model_h(
@@ -121,6 +126,7 @@ def forecast_day():
                 "house": house_id.replace("_", " "),
                 "true_values_consumption": lstm_result_consumption["true_values"],
                 "true_values_production": None,
+
                 "lstm_predictions_consumption": lstm_result_consumption["predictions"],
                 "lstm_mae_consumption": lstm_result_consumption["mae"],
                 "lstm_mse_consumption": lstm_result_consumption["mse"],
@@ -135,15 +141,33 @@ def forecast_day():
                 "transformer_smape_consumption": transformer_result_consumption["smape"],
                 "transformer_mape_consumption": transformer_result_consumption["mape"],
 
-                "lstm_predictions_production": None,
+                "diffusion_predictions_consumption": diffusion_result_consumption["predictions"],
+                "diffusion_mae_consumption": diffusion_result_consumption["mae"],
+                "diffusion_mse_consumption": diffusion_result_consumption["mse"],
+                "diffusion_r2_consumption": diffusion_result_consumption["r2_score"],
+                "diffusion_smape_consumption": diffusion_result_consumption["smape"],
+                "diffusion_mape_consumption": diffusion_result_consumption["mape"],
+
+                "lstm_predictions_production":None,
+                "lstm_mae_production": None,
+                "lstm_mse_production": None,
                 "lstm_r2_production": None,
                 "lstm_smape_production": None,
-                "lstm_crps_production": None,
+                "lstm_mape_production": None,
 
                 "transformer_predictions_production": None,
+                "transformer_mae_production": None,
+                "transformer_mse_production": None,
                 "transformer_r2_production": None,
                 "transformer_smape_production": None,
-                "transformer_crps_production": None
+                "transformer_mape_production": None,
+
+                "diffusion_predictions_production": None,
+                "diffusion_mae_production": None,
+                "diffusion_mse_production": None,
+                "diffusion_r2_production": None,
+                "diffusion_smape_production": None,
+                "diffusion_mape_production": None
             })
         else:
             return jsonify({
@@ -199,29 +223,6 @@ def forecast_day():
         import traceback
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
-@app.route("/stats/aep", methods=["GET"])
-def get_aes_stats():
-    data = request.json
-    house_id = data.get("house_id")
-    if not house_id:
-        return jsonify({"error": "Missing house_id"}), 400
-
-    try:
-        csv_path = f"../training sets/{house_id}_Wh.csv"
-        df = pd.read_csv(csv_path)
-        consumption = df.iloc[:, 1]
-
-        result = {
-            "house": house_id,
-            "consumption_mean": consumption.mean(),
-            "consumption_baseline": consumption.iloc[0],
-            "consumption_median": consumption.median()
-        }
-        return jsonify(result)
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
 
 @app.route("/house_stats", methods=["POST"])
 def get_h_stats():
@@ -240,13 +241,14 @@ def get_h_stats():
             hourly_df = df.resample("1H").sum()
 
             consumption = hourly_df.iloc[:, 0]
+            consumption_baseline = baseline_calculator(consumption)
             timestamps = [ts.strftime("%Y-%m-%d") for ts in consumption.index]
             start_date = consumption.index[0].strftime("%Y-%m-%d")
             end_date = consumption.index[-1].strftime("%Y-%m-%d")
 
             days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            grouped_c = consumption.groupby(consumption.index.dayofweek)
-
+            daily_consumption = consumption.resample("1D").sum()
+            grouped_c = daily_consumption.groupby(daily_consumption.index.dayofweek)
             daily_stats = {}
             for i, day in enumerate(days):
                 daily_stats[day] = {
@@ -258,8 +260,8 @@ def get_h_stats():
                     "production_mean": None,
                 }
 
-            weekly_mean_consumption = consumption.resample('W').mean().mean()
-            monthly_mean_consumption = consumption.resample('M').mean().mean()
+            weekly_mean_consumption = consumption.resample('W').sum().mean()
+            monthly_mean_consumption = consumption.resample('M').sum().mean()
             pct_positive_consumption = (consumption > 0).sum() / len(consumption) * 100
 
             result = {
@@ -267,16 +269,18 @@ def get_h_stats():
                 "start_date": start_date,
                 "end_date": end_date,
                 "consumption_mean": consumption.mean(),
-                "consumption_baseline": consumption.iloc[0],
+                "consumption_first_value": consumption.iloc[0],
                 "consumption_median": consumption.median(),
                 "consumption_std": consumption.std(),
                 "production_mean": None,
-                "production_baseline": None,
+                "production_first_value": None,
                 "production_median": None,
                 "production_std": None,
                 "timestamps": timestamps,
                 "consumption_series": consumption.tolist(),
+                "consumption_baseline": consumption_baseline.tolist(),
                 "production_series": None,
+                "production_baseline": None,
                 "daily_stats": daily_stats,
                 "weekly_mean_consumption": weekly_mean_consumption,
                 "monthly_mean_consumption": monthly_mean_consumption,
@@ -292,10 +296,18 @@ def get_h_stats():
 
             consumption = hourly_df.iloc[:, 3]
             production = hourly_df.iloc[:, 2]
+            consumption_baseline = baseline_calculator(consumption)
+            production_baseline = baseline_calculator(production)
 
+            daily_consumption = consumption.resample("1D").sum()
+            grouped_c = daily_consumption.groupby(daily_consumption.index.dayofweek)
+
+            if production is not None:
+                daily_production = production.resample("1D").sum()
+                grouped_p = daily_production.groupby(daily_production.index.dayofweek)
+            else:
+                grouped_p = None
             days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-            grouped_c = consumption.groupby(consumption.index.dayofweek)
-            grouped_p = production.groupby(production.index.dayofweek)
 
             daily_stats = {}
             for i, day in enumerate(days):
@@ -308,8 +320,8 @@ def get_h_stats():
                     "production_mean": grouped_p.mean().get(i, np.nan),
                 }
 
-            weekly_mean_consumption = consumption.resample('W').mean().mean()
-            monthly_mean_consumption = consumption.resample('M').mean().mean()
+            weekly_mean_consumption = consumption.resample('W').sum().mean()
+            monthly_mean_consumption = consumption.resample('M').sum().mean()
             weekly_mean_production = production.resample('W').mean().mean()
             monthly_mean_production = production.resample('M').mean().mean()
 
@@ -325,14 +337,16 @@ def get_h_stats():
                 "start_date": start_date,
                 "end_date": end_date,
                 "consumption_mean": consumption.mean(),
-                "consumption_baseline": consumption.iloc[0],
+                "consumption_first_value": consumption.iloc[0],
                 "production_mean": production.mean(),
-                "production_baseline": production.iloc[0],
+                "production_first_value": production.iloc[0],
                 "consumption_std": consumption.std(),
                 "production_std": production.std(),
                 "timestamps": timestamps,
                 "consumption_series": consumption.tolist(),
                 "production_series": production.tolist(),
+                "consumption_baseline": consumption_baseline.tolist(),
+                "production_baseline": production_baseline.tolist(),
                 "daily_stats": daily_stats,
                 "weekly_mean_consumption": weekly_mean_consumption,
                 "monthly_mean_consumption": monthly_mean_consumption,
@@ -354,6 +368,19 @@ def get_h_stats():
 def plot_house_day():
     import numpy as np
 
+    def get_season(dt):
+        seasons = [
+            ('Winter', (1, 1), (2, 28)),
+            ('Spring', (3, 1), (5, 31)),
+            ('Summer', (6, 1), (8, 31)),
+            ('Fall',   (9, 1), (11, 30)),
+            ('Winter', (12, 1), (12, 31))
+        ]
+        for season, start, end in seasons:
+            if (dt.month, dt.day) >= start and (dt.month, dt.day) <= end:
+                return season
+        return 'Winter'
+
     data = request.json
     house_id = data.get("house_id")
     date_str = data.get("date")
@@ -373,30 +400,31 @@ def plot_house_day():
             df["date_only"] = df.index.date
             day_data = df[df["date_only"] == date]
 
-
             if day_data.empty:
                 return jsonify({"error": f"No data available for {date_str}"}), 404
 
             consumption = day_data.iloc[:, 0]
+            production = pd.Series([None] * len(consumption), index=consumption.index)
+            consumption_baseline_full = baseline_calculator(df.iloc[:, 0])
+            consumption_baseline = consumption_baseline_full[consumption.index]
 
-            result = {
-                "house": house_id,
-                "date": date_str,
-                "consumption_mean": float(consumption.mean()),
-                "consumption_baseline": float(consumption.iloc[0]),
-                "consumption_median": float(consumption.median()),
-                "production_mean": None,
-                "production_baseline": None,
-                "production_median": None,
-                "consumption_series": np.round(consumption.values, 5).tolist(),
-                "production_series": None
-            }
+            weekday_name = day_data.index[0].strftime("%A")
+            all_days = df[df.index.dayofweek == day_data.index[0].dayofweek]
+            prev_same_days = all_days[all_days.index.date < date]
+            prev_same_days = prev_same_days.select_dtypes(include=[np.number])
+            prev_same_days = prev_same_days.groupby(prev_same_days.index.date).sum()
+            previous_this_days_mean = float(prev_same_days.iloc[:, 0].mean()) if not prev_same_days.empty else None
+            previous_this_days_max = float(prev_same_days.iloc[:, 0].max()) if not prev_same_days.empty else None
+            previous_this_days_min = float(prev_same_days.iloc[:, 0].min()) if not prev_same_days.empty else None
+
+            previous_this_days_mean_prod = None
+            previous_this_days_max_prod = None
+            previous_this_days_min_prod = None
 
         else:
             hourly_df = df.resample("1h").sum()
             hourly_df["date_only"] = hourly_df.index.date
             day_data = hourly_df[hourly_df["date_only"] == date]
-
 
             if day_data.empty:
                 return jsonify({"error": f"No data available for {date_str}"}), 404
@@ -404,18 +432,49 @@ def plot_house_day():
             consumption = day_data.iloc[:, 3]
             production = day_data.iloc[:, 2]
 
-            result = {
-                "house": house_id,
-                "date": date_str,
-                "consumption_mean": float(consumption.mean()),
-                "consumption_baseline": float(consumption.iloc[0]),
-                "consumption_median": float(consumption.median()),
-                "production_mean": float(production.mean()),
-                "production_baseline": float(production.iloc[0]),
-                "production_median": float(production.median()),
-                "consumption_series": np.round(consumption.values, 5).tolist(),
-                "production_series": np.round(production.values, 5).tolist()
-            }
+            consumption_baseline_full = baseline_calculator(hourly_df.iloc[:, 3])
+            production_baseline_full = baseline_calculator(hourly_df.iloc[:, 2])
+            consumption_baseline = consumption_baseline_full[consumption.index]
+            production_baseline = production_baseline_full[production.index]
+
+            weekday_name = day_data.index[0].strftime("%A")
+            all_days = hourly_df[hourly_df.index.dayofweek == day_data.index[0].dayofweek]
+            prev_same_days = all_days[all_days.index.date < date]
+            prev_same_days = prev_same_days.select_dtypes(include=[np.number])
+            prev_same_days = prev_same_days.groupby(prev_same_days.index.date).sum()
+            previous_this_days_mean = float(prev_same_days.iloc[:, 3].mean()) if not prev_same_days.empty else None
+            previous_this_days_max = float(prev_same_days.iloc[:, 3].max()) if not prev_same_days.empty else None
+            previous_this_days_min = float(prev_same_days.iloc[:, 3].min()) if not prev_same_days.empty else None
+
+            previous_this_days_mean_prod = float(prev_same_days.iloc[:, 2].mean()) if not prev_same_days.empty else None
+            previous_this_days_max_prod = float(prev_same_days.iloc[:, 2].max()) if not prev_same_days.empty else None
+            previous_this_days_min_prod = float(prev_same_days.iloc[:, 2].min()) if not prev_same_days.empty else None
+
+        season = get_season(pd.to_datetime(date_str))
+
+        result = {
+            "house": house_id,
+            "date": date_str,
+            "weekday_name": weekday_name,
+            "season": season,
+            "consumption_mean": float(consumption.mean()),
+            "consumption_total": float(consumption.sum()),
+            "consumption_std": float(consumption.std()),
+            "production_mean": float(production.mean()) if production.notnull().any() else None,
+            "production_total": float(production.sum()) if production.notnull().any() else None,
+            "production_std": float(production.std()) if production.notnull().any() else None,
+            "consumption_series": np.round(consumption.values, 5).tolist(),
+            "production_series": np.round(production.values, 5).tolist() if production.notnull().any() else None,
+            "previous_this_days_mean": previous_this_days_mean,
+            "previous_this_days_max": previous_this_days_max,
+            "previous_this_days_min": previous_this_days_min,
+            "previous_this_days_mean_production": previous_this_days_mean_prod if production.notnull().any() else None,
+            "previous_this_days_max_production": previous_this_days_max_prod if production.notnull().any() else None,
+            "previous_this_days_min_production": previous_this_days_min_prod if production.notnull().any() else None,
+            "consumption_baseline": consumption_baseline.tolist(),
+            "production_baseline": production_baseline.tolist() if production.notnull().any() else None,
+
+        }
 
         return jsonify(result)
 
@@ -425,6 +484,25 @@ def plot_house_day():
         return jsonify({"error": str(e)}), 500
 
 
+def baseline_calculator(series, window=7):
+    day_hour_memory = {}
+    medians = []
+
+    for idx, value in zip(series.index, series.values):
+        key = (idx.dayofweek, idx.hour)
+        if key not in day_hour_memory:
+            day_hour_memory[key] = []
+
+        prev_values = day_hour_memory[key][-window:]
+        if prev_values:
+            median = np.median(prev_values)
+        else:
+            median = 0
+
+        medians.append(median)
+        day_hour_memory[key].append(value)
+
+    return pd.Series(medians, index=series.index)
 
 if __name__ == "__main__":
     app.run(debug=True)

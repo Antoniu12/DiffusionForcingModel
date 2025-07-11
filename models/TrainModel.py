@@ -1,18 +1,11 @@
 import copy
-
 import torch
 from torch import nn, optim
 import numpy as np
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from torchmetrics.regression import MeanAbsolutePercentageError
+from torchmetrics.regression import SymmetricMeanAbsolutePercentageError
 
-def smape(y_true, y_pred):
-    denominator = (np.abs(y_true) + np.abs(y_pred)) + 1e-8
-    diff = np.abs(y_pred - y_true)
-    return 100 * np.mean(2.0 * diff / denominator)
-
-def mape(y_true, y_pred):
-    y_true_safe = np.where(np.abs(y_true) < 1e-8, 1e-8, y_true)
-    return 100 * np.mean(np.abs((y_true - y_pred) / y_true_safe))
 def train_model(model, train_loader, val_loader, num_epochs=100, patience=10, device='cpu'):
     model.to(device)
     criterion = nn.MSELoss()
@@ -69,7 +62,8 @@ def evaluate_test_dataset(
     model.eval()
     preds = []
     targets = []
-
+    mape = MeanAbsolutePercentageError()
+    smape = SymmetricMeanAbsolutePercentageError()
     with torch.no_grad():
         for x_batch, y_batch in test_loader:
             x_batch = x_batch.to(device)
@@ -102,9 +96,10 @@ def evaluate_test_dataset(
     mae = mean_absolute_error(targets_denorm, preds_denorm)
     mse = mean_squared_error(targets_denorm, preds_denorm)
     r2 = r2_score(targets_denorm, preds_denorm)
-    smape_val = smape(targets_denorm, preds_denorm)
-    mape_val = mape(targets_denorm, preds_denorm)
-
+    smape_val = smape(torch.tensor(preds_denorm), torch.tensor(targets_denorm))
+    mape_val = mape(torch.tensor(preds_denorm), torch.tensor(targets_denorm))
+    smape_val = smape_val.item() * 100
+    mape_val = mape_val.item() * 100
     metrics = {
         "MAE": mae,
         "MSE": mse,

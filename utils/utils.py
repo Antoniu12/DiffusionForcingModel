@@ -3,27 +3,10 @@ import os
 from datetime import datetime
 
 import numpy as np
-import pandas as pd
 import torch
-import torch.nn.functional as F
 from properscoring import crps_gaussian
 
-
 def cosine_beta_schedule(timesteps, s=0.008):
-    """
-    Generates a cosine-beta schedule for the diffusion process.
-
-    :param timesteps: The maximum level of noise / Total number of diffusion steps.
-    :param s: Offset to prevent betas of becoming 0.
-    :return: A tensor of shape (timesteps,) containing beta values for each diffusion step.
-
-     Description:
-        - Uses a cosine curve to smoothly control the cumulative product of alphas.
-        - The alphas_cumprod curve follows a scaled squared cosine shape.
-        - Beta at each step is defined as 1 - (next cumulative alpha / current cumulative alpha).
-        - Betas are clamped between [1e-8, 0.999] for numerical stability.
-    """
-
     steps = timesteps + 1
     x = torch.linspace(0, timesteps, steps) / timesteps
     alphas_cumprod = torch.cos((x + s) / (1 + s) * math.pi * 0.5) ** 2
@@ -32,19 +15,6 @@ def cosine_beta_schedule(timesteps, s=0.008):
     betas = torch.clip(betas, min=1e-8, max=0.999)
     return betas
 def get_alphas(betas):
-    """
-    Computes alphas and cumulative product of alphas from beta schedule.
-
-    :param betas: Tensor of beta values from the beta scheduler.
-    :return:
-        - alpha: Tensor, alphas at each timestep, where alpha = 1 - beta
-        - alpha_bars: Tensor, cumulative product of alphas
-
-    Description:
-        - Alphas represent the amount of "signal" preserved after each diffusion step.
-        - Alpha_bars represent how much total "signal" is preserved up to time t.
-    """
-
     alphas = 1.0 - betas
     alpha_bars = torch.cumprod(alphas, dim=0)
     return alphas, alpha_bars
@@ -64,14 +34,8 @@ def get_scheduled_k(epoch, total_epochs, K, min_k=0, max_k=None):
     k_max_sched = min(max_k, k_center + margin)
 
     return k_min_sched, k_max_sched
-    # return K-1, K-1
 
 def compute_crps(ground_truth, mean_prediction, std_prediction):
-    """
-    ground_truth: numpy array (shape [N,])
-    mean_prediction: numpy array (shape [N,])
-    std_prediction: numpy array (shape [N,])
-    """
     crps = crps_gaussian(ground_truth, mean_prediction, std_prediction)
     return crps.mean()
 

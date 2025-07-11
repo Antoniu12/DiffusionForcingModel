@@ -9,7 +9,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import os
 
-def load_and_preprocess_data(file_path, granularity="1h"):
+def load_and_preprocess_data(file_path, granularity="1h", add_noise=None):
     data = pd.read_csv(file_path)
     data = data[['date', ' Consumption(Wh)', ' Production(Wh)']]
     data['date'] = pd.to_datetime(data['date'])
@@ -55,7 +55,8 @@ def load_and_preprocess_data(file_path, granularity="1h"):
     data['cos_day'] = np.cos(2 * np.pi * day_of_year / 365)
 
     data = data.fillna(0)
-
+    if add_noise:
+        data = add_label_noise(data, label_col=' Consumption(Wh)', fraction_noisy=0.1)
     features_to_normalize = [
         ' Consumption(Wh)', ' Production(Wh)',
         'trend', 'seasonal', 'residual', 'trend_production', 'seasonal_production', 'residual_production',
@@ -86,7 +87,18 @@ def create_tensors(data, test_size=0.1, val_size=0.2):
     print(f"Test set ends at: {test_end_index}")
     return train_tensor, val_tensor, test_tensor
 
+def add_label_noise(df, label_col, fraction_noisy=0.1):
+    np.random.seed(42)
+    df_noisy = df.copy()
+    num_rows = len(df_noisy)
+    num_noisy = int(num_rows * fraction_noisy)
+    noise_std = df_noisy[label_col].std() * 0.05
+    noisy_indices = np.random.choice(df_noisy.index, size=num_noisy, replace=False)
+    noise = np.random.normal(0, noise_std, num_noisy)
 
+    df_noisy.loc[noisy_indices, label_col] += noise
+
+    return df_noisy
 def create_sequences(data_tensor, seq_length):
     sequences = []
     for i in range(len(data_tensor) - seq_length + 1):
@@ -94,19 +106,7 @@ def create_sequences(data_tensor, seq_length):
         sequences.append(seq)
     return sequences
 
-
 def plot_feature_correlation_heatmap(dataframe, save_dir="plots", title="Feature Correlation Heatmap"):
-    """
-    Creates and saves a heatmap of the feature correlations with enlarged figure and font size.
-
-    Args:
-        dataframe (pd.DataFrame): Input dataframe after preprocessing (normalized or not).
-        save_dir (str): Directory where to save the heatmap image.
-        title (str): Title of the heatmap.
-
-    Returns:
-        None
-    """
     os.makedirs(save_dir, exist_ok=True)
     corr_matrix = dataframe.corr()
     plt.figure(figsize=(22, 18))
@@ -137,7 +137,6 @@ def preprocess_aep_dataset(file_path, test_size=0.1, val_size=0.2):
     df['weekday'] = df.index.weekday
     df['month'] = df.index.month
 
-    target_col = 'AEP_MW'
     feature_cols = ['AEP_MW', 'hour', 'day', 'weekday', 'month']
 
     scaler = MinMaxScaler()

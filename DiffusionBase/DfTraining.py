@@ -2,20 +2,14 @@ import random
 
 import numpy as np
 import torch
-from adabelief_pytorch import AdaBelief
 from torch import nn
-from torchmetrics import R2Score, SymmetricMeanAbsolutePercentageError
+from torchmetrics import R2Score
+from torchmetrics.regression import MeanAbsolutePercentageError
+from torchmetrics.regression import SymmetricMeanAbsolutePercentageError
 
 from utils.utils import get_scheduled_k
 
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-
-def smape(y_true, y_pred):
-    denominator = (np.abs(y_true) + np.abs(y_pred)) + 1e-8
-    return 100 * np.mean(2 * np.abs(y_pred - y_true) / denominator)
-def mape(y_true, y_pred):
-    y_true = np.where(np.abs(y_true) < 1e-8, 1e-8, y_true)
-    return 100 * np.mean(np.abs((y_true - y_pred) / y_true))
 
 
 def forward_diffuse(xt_true, kt, alpha_bar):
@@ -63,10 +57,9 @@ def train_next_token_diffusion(model, data, validation_data, alpha, alpha_bar, K
             xt_pred, epsilon_pred, zt_prev = model(zt_prev, xt_noisy_full, kt, alpha_bar)
             zt_prev = zt_prev.detach()
 
-            loss_xt = (loss_fn(xt_pred, x_target) * 6 + loss_fn(xt_pred[:, :, 0], x_target[:, :, 0])* 4)# +
-            #            loss_fn(xt_pred[:, :, 1], x_target[:, :, 1]) * 2)
+            loss_xt = (loss_fn(xt_pred, x_target) * 6 + loss_fn(xt_pred[:, :, 0], x_target[:, :, 0]) * 4)# +
+                       # loss_fn(xt_pred[:, :, 1], x_target[:, :, 1]) * 2)
             loss_eps = loss_fn(epsilon_pred[:, -1:, :], epsilon_true)
-            # loss_eps = loss_fn(epsilon_pred, epsilon_true)
 
             loss = loss_xt + loss_eps
 
@@ -231,6 +224,8 @@ def predict_with_random_last_noise_2(
     model.eval()
     preds = []
     targets = []
+    mape = MeanAbsolutePercentageError()
+    smape = SymmetricMeanAbsolutePercentageError()
     zt_prev = torch.zeros((1, start_offset, model.fc_project_seq_to_hidden.out_features), device=device)
 
     with torch.no_grad():
@@ -275,8 +270,11 @@ def predict_with_random_last_noise_2(
     mae = mean_absolute_error(targets_denorm, preds_denorm)
     mse = mean_squared_error(targets_denorm, preds_denorm)
     r2 = r2_score(targets_denorm, preds_denorm)
-    smape_val = smape(targets_denorm, preds_denorm)
-    mape_val = mape(targets_denorm, preds_denorm)
+
+    smape_val = smape(torch.tensor(preds_denorm), torch.tensor(targets_denorm))
+    mape_val = mape(torch.tensor(preds_denorm), torch.tensor(targets_denorm))
+    smape_val = smape_val.item() * 100
+    mape_val = mape_val.item() * 100
 
     metrics = {
         "MAE": mae,
@@ -288,8 +286,6 @@ def predict_with_random_last_noise_2(
         "targets": targets_denorm,
     }
     return metrics
-
-
 
 def autoregressive_forecast(
         model, context_seq, alpha, alpha_bar, K, device, steps=24
@@ -358,7 +354,6 @@ def teacher_forcing_forecast(
     _, _, zt_pred = model(zt_prev, xt_noisy_full, kt_zero, alpha_bar)
     zt_prev = zt_pred.detach()
 
-    # current_window = torch.cat([context_seq[1:], torch.randn_like(context_seq[:1])], dim=0)
     current_window = context_seq[1:].unsqueeze(0).to(device)
 
 
